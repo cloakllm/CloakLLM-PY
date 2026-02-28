@@ -15,6 +15,13 @@ from typing import Optional
 from cloakllm.config import ShieldConfig
 from cloakllm.detector import Detection
 
+_TOKEN_PATTERN = re.compile(r"\[([A-Z_]+_\d+)\]")
+_ESCAPED_OPEN = "\uFF3B"
+_ESCAPED_CLOSE = "\uFF3D"
+_ESCAPED_PATTERN = re.compile(
+    rf"{re.escape(_ESCAPED_OPEN)}([A-Z_]+_\d+){re.escape(_ESCAPED_CLOSE)}"
+)
+
 
 @dataclass
 class TokenMap:
@@ -74,6 +81,14 @@ class Tokenizer:
     def __init__(self, config: ShieldConfig):
         self.config = config
 
+    def _escape_existing_tokens(self, text: str) -> str:
+        return _TOKEN_PATTERN.sub(
+            lambda m: f"{_ESCAPED_OPEN}{m.group(1)}{_ESCAPED_CLOSE}", text
+        )
+
+    def _unescape_tokens(self, text: str) -> str:
+        return _ESCAPED_PATTERN.sub(lambda m: f"[{m.group(1)}]", text)
+
     def tokenize(
         self,
         text: str,
@@ -94,9 +109,8 @@ class Tokenizer:
         if token_map is None:
             token_map = TokenMap()
 
-        # Build the sanitized string by replacing detections back-to-front
-        # (so character offsets remain valid)
-        result = text
+        # Escape any existing token-like patterns to prevent fake token injection
+        result = self._escape_existing_tokens(text)
         for det in reversed(detections):
             token = token_map.get_or_create(det.text, det.category)
             result = result[:det.start] + token + result[det.end:]
@@ -123,6 +137,9 @@ class Tokenizer:
         )
 
         for token, original in sorted_tokens:
-            result = re.sub(re.escape(token), original, result, flags=re.IGNORECASE)
+            result = re.sub(re.escape(token), lambda m: original, result, flags=re.IGNORECASE)
+
+        # Restore any escaped token-like patterns from the original input
+        result = self._unescape_tokens(result)
 
         return result

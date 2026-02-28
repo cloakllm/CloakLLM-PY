@@ -13,6 +13,16 @@ import sys
 from pathlib import Path
 
 
+def _warn_if_outside_cwd(dir_path: str) -> None:
+    resolved = Path(dir_path).resolve()
+    cwd = Path.cwd().resolve()
+    try:
+        resolved.relative_to(cwd)
+    except ValueError:
+        print(f"Warning: Log directory '{resolved}' is outside the current working directory.",
+              file=sys.stderr)
+
+
 def cmd_scan(args):
     """Scan text for sensitive data and show what would be sanitized."""
     from cloakllm import Shield, ShieldConfig
@@ -54,6 +64,7 @@ def cmd_verify(args):
     from cloakllm import ShieldConfig
     from cloakllm.audit import AuditLogger
 
+    _warn_if_outside_cwd(args.log_dir)
     log_dir = Path(args.log_dir)
     if not log_dir.exists():
         print(f"❌ Log directory not found: {log_dir}")
@@ -79,6 +90,7 @@ def cmd_stats(args):
     from cloakllm import ShieldConfig
     from cloakllm.audit import AuditLogger
 
+    _warn_if_outside_cwd(args.log_dir)
     log_dir = Path(args.log_dir)
     config = ShieldConfig(log_dir=log_dir)
     logger = AuditLogger(config)

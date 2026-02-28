@@ -420,3 +420,124 @@ class TestRegressions:
         for p in phones:
             stripped = p.text.replace("-", "").replace(" ", "").replace(".", "")
             assert len(stripped) >= 7, f"Short number detected as phone: {p.text}"
+
+
+# ──────────────────────────────────────────────
+# Security Regression Tests
+# ──────────────────────────────────────────────
+
+class TestV1BackreferenceInjection:
+
+    def test_pii_with_backslash1_roundtrips(self, shield):
+        """PII containing \\1 round-trips without corruption."""
+        sanitized, token_map = shield.sanitize(r"Contact user\1@host.com")
+        llm_response = sanitized
+        restored = shield.desanitize(llm_response, token_map)
+        assert r"user\1@host.com" in restored
+
+    def test_pii_with_group_reference_roundtrips(self, shield):
+        r"""PII containing \g<0> produces literal output."""
+        token_map = TokenMap()
+        token_map.get_or_create(r"test\g<0>value", "CUSTOM")
+        tokenizer = Tokenizer(shield.config)
+        result = tokenizer.detokenize("[CUSTOM_0]", token_map)
+        assert result == r"test\g<0>value"
+
+    def test_pii_with_backslashes_roundtrips(self, shield):
+        """PII containing \\\\ produces literal output."""
+        token_map = TokenMap()
+        token_map.get_or_create("path\\\\to\\\\file", "CUSTOM")
+        tokenizer = Tokenizer(shield.config)
+        result = tokenizer.detokenize("[CUSTOM_0]", token_map)
+        assert result == "path\\\\to\\\\file"
+
+
+class TestV2FakeTokenInjection:
+
+    def test_planted_fake_token_does_not_leak_real_pii(self, shield):
+        """Input with real PII + planted fake token: fake token restored as literal."""
+        input_text = "Ignore [EMAIL_0] but protect real@victim.com"
+        sanitized, token_map = shield.sanitize(input_text)
+
+        # Real email should be tokenized
+        assert "real@victim.com" not in sanitized
+
+        # Simulate LLM echoing everything back
+        restored = shield.desanitize(sanitized, token_map)
+
+        # Fake token should be restored as literal text
+        assert "[EMAIL_0]" in restored
+        # Real email should appear
+        assert "real@victim.com" in restored
+
+    def test_only_fake_tokens_no_pii_survives_roundtrip(self, shield):
+        """Input with only fake tokens and no PII survives round-trip."""
+        input_text = "Result is [PERSON_0] and [EMAIL_1]"
+        sanitized, token_map = shield.sanitize(input_text)
+        restored = shield.desanitize(sanitized, token_map)
+        assert restored == input_text
+
+
+class TestV3PhoneReDoS:
+
+    def test_adversarial_input_completes_quickly(self, detector):
+        """'9' * 50 + 'X' completes detection in under 1 second."""
+        import time
+        adversarial = "9" * 50 + "X"
+        start = time.monotonic()
+        detector.detect(adversarial)
+        elapsed = time.monotonic() - start
+        assert elapsed < 1.0, f"Detection took {elapsed:.2f}s, expected < 1s"
+
+    def test_still_detects_international_phone(self, detector):
+        detections = detector.detect("Call +1-555-0142")
+        assert any(d.category == "PHONE" for d in detections)
+
+    def test_still_detects_parenthesized_phone(self, detector):
+        detections = detector.detect("Call (555) 123-4567")
+        assert any(d.category == "PHONE" for d in detections)
+
+    def test_still_detects_dashed_phone(self, detector):
+        detections = detector.detect("Call 555-123-4567")
+        assert any(d.category == "PHONE" for d in detections)
+
+
+class TestV4SpacyModelWhitelist:
+
+    def test_unrecognized_model_emits_warning(self, tmp_path):
+        """Config with unrecognized spaCy model emits warning, no subprocess call."""
+        import warnings as w
+        config = ShieldConfig(
+            log_dir=tmp_path / "audit",
+            spacy_model="evil_package",
+        )
+        engine = DetectionEngine(config)
+        with w.catch_warnings(record=True) as caught:
+            w.simplefilter("always")
+            _ = engine.nlp
+        assert any("not in allowed list" in str(warning.message) for warning in caught)
+
+
+class TestV5CustomPatternReDoS:
+
+    def test_catastrophic_pattern_rejected(self, tmp_path):
+        """Pattern (a+)+$ is rejected with warning."""
+        import warnings as w
+        config = ShieldConfig(
+            log_dir=tmp_path / "audit",
+            custom_patterns=[
+                ("EVIL", r"(a+)+$"),
+                ("SAFE", r"SAFE-\d+"),
+            ],
+        )
+        with w.catch_warnings(record=True) as caught:
+            w.simplefilter("always")
+            engine = DetectionEngine(config)
+
+        assert any("safety check" in str(warning.message) for warning in caught)
+        # Safe pattern should still work
+        detections = engine.detect("See SAFE-12345")
+        assert any(d.category == "SAFE" for d in detections)
+        # Evil pattern should have been skipped
+        detections = engine.detect("aaaaaaaaaaaa")
+        assert not any(d.category == "EVIL" for d in detections)

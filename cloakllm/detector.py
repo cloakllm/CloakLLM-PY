@@ -10,7 +10,19 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+import warnings
+
 from cloakllm.config import ShieldConfig
+
+ALLOWED_SPACY_MODELS = frozenset({
+    "en_core_web_sm", "en_core_web_md", "en_core_web_lg", "en_core_web_trf",
+    "xx_ent_wiki_sm",
+    "de_core_news_sm", "de_core_news_md", "de_core_news_lg",
+    "fr_core_news_sm", "fr_core_news_md", "fr_core_news_lg",
+    "es_core_news_sm", "es_core_news_md", "es_core_news_lg",
+    "he_core_news_sm", "he_core_news_md", "he_core_news_lg",
+    "zh_core_web_sm", "zh_core_web_md", "zh_core_web_lg", "zh_core_web_trf",
+})
 
 
 @dataclass(frozen=True)
@@ -46,7 +58,7 @@ PATTERNS: dict[str, tuple[str, str]] = {
     # Phone numbers (international + US formats)
     "PHONE": (
         r"phone",
-        r"(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}\b"
+        r"(?:\+\d{1,3}[-.\s])?(?:\(?\d{2,4}\)?[-.\s]?)?\d{3,4}[-.\s]?\d{3,4}\b"
     ),
     # IP addresses (IPv4)
     "IP_ADDRESS": (
@@ -90,6 +102,15 @@ class DetectionEngine:
         self._compiled_patterns: list[tuple[str, re.Pattern]] = []
         self._build_patterns()
 
+    @staticmethod
+    def _test_regex_safety(regex: re.Pattern) -> bool:
+        """Test if a regex is safe from catastrophic backtracking."""
+        import time
+        test_input = 'a' * 20 + '!'
+        start = time.monotonic()
+        regex.search(test_input)
+        return (time.monotonic() - start) < 0.1
+
     def _build_patterns(self):
         """Compile regex patterns based on config."""
         pattern_map = {
@@ -114,11 +135,17 @@ class DetectionEngine:
         # Add custom patterns
         for name, pattern in self.config.custom_patterns:
             try:
-                self._compiled_patterns.append(
-                    (name, re.compile(pattern))
-                )
+                compiled = re.compile(pattern)
+                if not self._test_regex_safety(compiled):
+                    warnings.warn(
+                        f"CloakLLM: Custom pattern '{name}' failed safety check "
+                        f"(potential ReDoS) — skipped",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                    continue
+                self._compiled_patterns.append((name, compiled))
             except re.error:
-                import warnings
                 warnings.warn(
                     f"Invalid custom regex pattern for '{name}': {pattern!r}",
                     RuntimeWarning,
@@ -134,6 +161,16 @@ class DetectionEngine:
                 try:
                     self._nlp = spacy.load(self.config.spacy_model)
                 except OSError:
+                    # Validate model name before attempting download
+                    if self.config.spacy_model not in ALLOWED_SPACY_MODELS:
+                        warnings.warn(
+                            f"spaCy model '{self.config.spacy_model}' not in allowed list. "
+                            f"Auto-download skipped. Install manually.",
+                            RuntimeWarning,
+                            stacklevel=2,
+                        )
+                        self._nlp = spacy.blank("en")
+                        return self._nlp
                     # Model not installed — try downloading it
                     try:
                         import subprocess
@@ -148,7 +185,6 @@ class DetectionEngine:
                         self._nlp = spacy.load(self.config.spacy_model)
                     except Exception:
                         # Download failed — use blank model (regex still works)
-                        import warnings
                         warnings.warn(
                             f"spaCy model '{self.config.spacy_model}' not available. "
                             f"NER detection disabled. Regex patterns still active. "
