@@ -36,6 +36,8 @@ cloakllm = "cloakllm.__main__:main"
 [project.urls]
 Homepage = "https://github.com/cloakllm/CloakLLM-PY"
 Issues = "https://github.com/cloakllm/CloakLLM-PY/issues"
+Repository = "https://github.com/cloakllm/CloakLLM-PY"
+Changelog = "https://github.com/cloakllm/CloakLLM-PY/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 include = ["cloakllm*"]
