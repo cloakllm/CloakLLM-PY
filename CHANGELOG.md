@@ -30,3 +30,5 @@ versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Phone number validation now strips dots before checking minimum digit count
 - Invalid custom regex patterns now emit a warning instead of crashing
 - Removed unused `category` variable in pattern compilation loop
+
+[0.1.0]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.0
