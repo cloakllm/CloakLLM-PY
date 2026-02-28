@@ -17,6 +17,6 @@ __version__ = "0.1.0"
 
 from cloakllm.shield import Shield
 from cloakllm.config import ShieldConfig
-from cloakllm.integrations.litellm_middleware import enable, disable
+from cloakllm.integrations.litellm_middleware import enable, disable, get_shield, is_enabled
 
-__all__ = ["Shield", "ShieldConfig", "enable", "disable"]
+__all__ = ["Shield", "ShieldConfig", "enable", "disable", "get_shield", "is_enabled"]

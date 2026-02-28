@@ -3,7 +3,7 @@ LiteLLM Middleware Integration.
 
 Usage:
     import cloakllm
-    cloakllm.enable()  # All LiteLLM calls are now shielded
+    cloakllm.enable()  # All LiteLLM calls are now cloaked
 
     # Or with custom config:
     from cloakllm import ShieldConfig
@@ -36,6 +36,13 @@ from cloakllm.tokenizer import TokenMap
 # Thread-safe storage for active token maps (keyed by unique call ID)
 _active_maps: dict[str, TokenMap] = {}
 _maps_lock = threading.Lock()
+
+# System hint injected when PII tokens are present, so the LLM treats them as real data
+_SYSTEM_HINT = (
+    "This conversation contains placeholders like [PERSON_0], [EMAIL_0], [ORG_0], etc. "
+    "Treat each placeholder as if it were the real value. Use them exactly as-is in your "
+    "response — do not ask the user to replace them or provide actual details."
+)
 
 # Module-level shield instance
 _shield: Optional[Shield] = None
@@ -82,6 +89,16 @@ def _sanitize_messages(messages: list[dict], model: str) -> tuple[list[dict], st
             sanitized_messages.append({**msg, "content": sanitized_parts})
         else:
             sanitized_messages.append(msg)
+
+    # Inject system hint so the LLM treats sanitized tokens as real values
+    if token_map is not None and token_map.entity_count > 0:
+        if sanitized_messages and sanitized_messages[0].get("role") == "system":
+            sanitized_messages[0] = {
+                **sanitized_messages[0],
+                "content": sanitized_messages[0]["content"] + "\n\n" + _SYSTEM_HINT,
+            }
+        else:
+            sanitized_messages.insert(0, {"role": "system", "content": _SYSTEM_HINT})
 
     # Store token map for response desanitization
     with _maps_lock:

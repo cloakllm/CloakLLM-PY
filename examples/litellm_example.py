@@ -3,7 +3,7 @@ Example: CloakLLM with LiteLLM.
 
 One line to enable PII protection across ALL your LLM calls.
 
-Run: ANTHROPIC_API_KEY=your-key python examples/litellm_example.py
+Run: ANTHROPIC_API_KEY=your-key-here python examples/litellm_example.py
 """
 
 import cloakllm
