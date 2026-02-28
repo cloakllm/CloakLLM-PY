@@ -173,19 +173,24 @@ def enable(config: Optional[ShieldConfig] = None):
             messages, call_key = _sanitize_messages(messages, model)
             kwargs["messages"] = messages
 
-        # Call original
-        response = _original_completion(*args, **kwargs)
+        try:
+            # Call original
+            response = _original_completion(*args, **kwargs)
 
-        # Desanitize response
-        if not _should_skip(model) and call_key and hasattr(response, "choices"):
-            for choice in response.choices:
-                if hasattr(choice, "message") and hasattr(choice.message, "content"):
-                    if choice.message.content:
-                        choice.message.content = _desanitize_response(
-                            choice.message.content, model, call_key
-                        )
+            # Desanitize response
+            if not _should_skip(model) and call_key and hasattr(response, "choices"):
+                for choice in response.choices:
+                    if hasattr(choice, "message") and hasattr(choice.message, "content"):
+                        if choice.message.content:
+                            choice.message.content = _desanitize_response(
+                                choice.message.content, model, call_key
+                            )
 
-        return response
+            return response
+        finally:
+            if call_key:
+                with _maps_lock:
+                    _active_maps.pop(call_key, None)
 
     # Patch LiteLLM
     litellm.completion = shielded_completion

@@ -14,5 +14,8 @@ ENV CLOAKLLM_LOG_DIR=/data/audit
 
 COPY examples/ ./examples/
 
+RUN useradd -m -r cloakllm && chown -R cloakllm:cloakllm /data/audit
+USER cloakllm
+
 ENTRYPOINT ["python", "-m", "cloakllm"]
 CMD ["--help"]

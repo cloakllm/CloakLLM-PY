@@ -34,8 +34,8 @@ all = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
 cloakllm = "cloakllm.__main__:main"
 
 [project.urls]
-Homepage = "https://github.com/cloakllm/cloakllm"
-Issues = "https://github.com/cloakllm/cloakllm/issues"
+Homepage = "https://github.com/cloakllm/CloakLLM"
+Issues = "https://github.com/cloakllm/CloakLLM/issues"
 
 [tool.setuptools.packages.find]
 include = ["cloakllm*"]
