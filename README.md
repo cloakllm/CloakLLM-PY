@@ -36,7 +36,8 @@ Your current logging (`logger.info()`) won't survive an audit. CloakLLM provides
 ### Install
 
 ```bash
-pip install cloakllm
+pip install cloakllm                  # standalone usage
+pip install cloakllm[litellm]         # with LiteLLM integration
 python -m spacy download en_core_web_sm
 ```
 
