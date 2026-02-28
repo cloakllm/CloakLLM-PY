@@ -18,6 +18,7 @@ Every prompt you send to an LLM provider is visible in plaintext — names, emai
                     │  Audit Log   │
                     │  (EU AI Act) │
                     └─────────────┘
+> **Also available for JavaScript/TypeScript:** `npm install cloakllm` — zero dependencies, OpenAI SDK integration. See [CloakLLM JS](https://github.com/cloakllm/CloakLLM-JS). | [Project Hub](https://github.com/cloakllm/CloakLLM)
 ```
 
 ## ⏰ Why Now?
