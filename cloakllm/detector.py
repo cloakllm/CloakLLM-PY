@@ -112,10 +112,10 @@ class DetectionEngine:
     def _test_regex_safety(regex: re.Pattern) -> bool:
         """Test if a regex is safe from catastrophic backtracking."""
         import time
-        test_input = 'a' * 20 + '!'
+        test_input = 'a' * 25 + '!'
         start = time.monotonic()
         regex.search(test_input)
-        return (time.monotonic() - start) < 0.1
+        return (time.monotonic() - start) < 0.05
 
     def _build_patterns(self):
         """Compile regex patterns based on config."""

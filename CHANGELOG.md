@@ -5,6 +5,19 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-03-01
+
+### Added
+
+- Local LLM detection (opt-in, via Ollama) for semantic PII: addresses, medical info, financial data, national IDs, biometrics, usernames, passwords, vehicle info
+- LLM detection config: `llm_detection`, `llm_model`, `llm_ollama_url`, `llm_timeout`, `llm_confidence`
+- MCP server package (`cloakllm-mcp`) for Claude Desktop integration
+
+### Fixed
+
+- Strengthened ReDoS safety check for custom regex patterns (longer test input, stricter threshold)
+- Flaky ReDoS timing test threshold increased for CI stability
+
 ## [0.1.0] - 2026-02-27
 
 ### Added
@@ -31,4 +44,5 @@ versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Invalid custom regex patterns now emit a warning instead of crashing
 - Removed unused `category` variable in pattern compilation loop
 
+[0.1.1]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.1
 [0.1.0]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.0
