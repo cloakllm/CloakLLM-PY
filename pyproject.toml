@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cloakllm"
-version = "0.1.1"
+version = "0.1.2"
 description = "AI Compliance Middleware — PII protection, tamper-evident audit logs, and EU AI Act compliance for LLM gateways"
 readme = "README.md"
 license = {text = "MIT"}
