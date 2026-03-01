@@ -149,11 +149,26 @@ shield = Shield(config=ShieldConfig(
 ))
 ```
 
+**LLM Detection (opt-in)** — uses a local Ollama instance to catch semantic PII (addresses, medical info, etc.):
+
+```python
+shield = Shield(config=ShieldConfig(
+    llm_detection=True,                  # Enable LLM-based detection
+    llm_model="llama3.2",               # Ollama model to use
+    llm_ollama_url="http://localhost:11434",  # Ollama endpoint
+    llm_timeout=10.0,                   # Timeout in seconds
+    llm_confidence=0.85,                # Confidence score for LLM detections
+))
+```
+
 Environment variables:
 ```bash
 CLOAKLLM_LOG_DIR=./audit
 CLOAKLLM_SPACY_MODEL=en_core_web_sm
 CLOAKLLM_OTEL_ENABLED=true
+CLOAKLLM_LLM_DETECTION=true
+CLOAKLLM_LLM_MODEL=llama3.2
+CLOAKLLM_OLLAMA_URL=http://localhost:11434
 ```
 
 ## 🔍 What Gets Detected
@@ -172,6 +187,15 @@ CLOAKLLM_OTEL_ENABLED=true
 | `IBAN` | DE89370400440532013000 | Regex |
 | `JWT` | eyJhbGciOi... | Regex |
 | Custom | Your patterns | Regex |
+| `ADDRESS` | 742 Evergreen Terrace | LLM (Local) |
+| `DATE_OF_BIRTH` | 1990-01-15 | LLM (Local) |
+| `MEDICAL` | diabetes mellitus | LLM (Local) |
+| `FINANCIAL` | account 4521-XXX | LLM (Local) |
+| `NATIONAL_ID` | TZ 12345678 | LLM (Local) |
+| `BIOMETRIC` | fingerprint hash | LLM (Local) |
+| `USERNAME` | @johndoe42 | LLM (Local) |
+| `PASSWORD` | P@ssw0rd123 | LLM (Local) |
+| `VEHICLE` | plate ABC-1234 | LLM (Local) |
 
 ## 🗺️ Roadmap
 
@@ -184,6 +208,7 @@ CLOAKLLM_OTEL_ENABLED=true
 - [ ] RFC 3161 trusted timestamping
 - [ ] Signed audit snapshots
 - [ ] MCP security gateway (tool validation, permission enforcement)
+- [x] Local LLM detection (opt-in, via Ollama)
 - [ ] Sensitivity-based routing (PII → local model, general → cloud)
 - [ ] Admin dashboard
 - [ ] EU AI Act conformity report generator

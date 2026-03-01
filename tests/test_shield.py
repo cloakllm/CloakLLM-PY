@@ -518,6 +518,64 @@ class TestV4SpacyModelWhitelist:
         assert any("not in allowed list" in str(warning.message) for warning in caught)
 
 
+# ──────────────────────────────────────────────
+# LLM Detection Integration Tests
+# ──────────────────────────────────────────────
+
+class TestLlmDetection:
+
+    def test_llm_detection_disabled_by_default(self, detector):
+        """LLM detector is None when llm_detection is not enabled."""
+        assert detector._llm_detector is None
+
+    def test_llm_detection_enabled_via_config(self, tmp_path):
+        """LLM detector is initialized when llm_detection=True."""
+        config = ShieldConfig(
+            log_dir=tmp_path / "audit",
+            llm_detection=True,
+        )
+        engine = DetectionEngine(config)
+        assert engine._llm_detector is not None
+
+    def test_full_flow_with_llm_detection(self, tmp_path):
+        """End-to-end: regex + LLM detection with mocked Ollama."""
+        import json
+        from unittest.mock import MagicMock, patch
+
+        config = ShieldConfig(
+            log_dir=tmp_path / "audit",
+            llm_detection=True,
+        )
+
+        # Mock Ollama to return an ADDRESS
+        def mock_urlopen(req, timeout=None):
+            url = req.full_url if hasattr(req, 'full_url') else req.get_full_url()
+            if "/api/tags" in url:
+                resp = MagicMock()
+                resp.read.return_value = b'{"models":[]}'
+                return resp
+            body = json.dumps({
+                "message": {
+                    "content": json.dumps({
+                        "entities": [{"value": "742 Evergreen Terrace", "category": "ADDRESS"}]
+                    })
+                }
+            }).encode()
+            resp = MagicMock()
+            resp.read.return_value = body
+            return resp
+
+        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+            shield = Shield(config)
+            text = "Email john@acme.com about 742 Evergreen Terrace"
+            sanitized, token_map = shield.sanitize(text)
+
+        assert "john@acme.com" not in sanitized
+        assert "[EMAIL_0]" in sanitized
+        # LLM detection adds at least one entity (ADDRESS or parts of it)
+        assert token_map.entity_count >= 2
+
+
 class TestV5CustomPatternReDoS:
 
     def test_catastrophic_pattern_rejected(self, tmp_path):

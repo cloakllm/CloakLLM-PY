@@ -33,7 +33,7 @@ class Detection:
     start: int         # Start character offset in original string
     end: int           # End character offset in original string
     confidence: float  # 0.0-1.0 confidence score
-    source: str        # "ner" or "regex"
+    source: str        # "regex", "ner", or "llm"
 
 
 # --- Regex patterns ---
@@ -101,6 +101,12 @@ class DetectionEngine:
         self._nlp = None
         self._compiled_patterns: list[tuple[str, re.Pattern]] = []
         self._build_patterns()
+
+        # --- LLM detector (opt-in Pass 3) ---
+        self._llm_detector = None
+        if config.llm_detection:
+            from cloakllm.llm_detector import LlmDetector
+            self._llm_detector = LlmDetector(config)
 
     @staticmethod
     def _test_regex_safety(regex: re.Pattern) -> bool:
@@ -248,6 +254,11 @@ class DetectionEngine:
                 source="ner",
             ))
             covered_spans.append((start, end))
+
+        # --- Pass 3: Local LLM (semantic/contextual PII, opt-in) ---
+        if self._llm_detector is not None:
+            llm_detections = self._llm_detector.detect(text, covered_spans)
+            detections.extend(llm_detections)
 
         # Sort by start position (important for tokenization)
         detections.sort(key=lambda d: d.start)

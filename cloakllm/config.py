@@ -40,6 +40,19 @@ class ShieldConfig:
     # Custom patterns: list of (name, regex_pattern) tuples
     custom_patterns: list[tuple[str, str]] = field(default_factory=list)
 
+    # --- LLM Detection (Pass 3: local LLM via Ollama) ---
+    llm_detection: bool = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_LLM_DETECTION", "false").lower() == "true"
+    )
+    llm_model: str = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_LLM_MODEL", "llama3.2")
+    )
+    llm_ollama_url: str = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_OLLAMA_URL", "http://localhost:11434")
+    )
+    llm_timeout: float = 10.0
+    llm_confidence: float = 0.85
+
     # --- Tokenization ---
     # Use descriptive tokens like [PERSON_0] vs opaque tokens like [TKN_A3F2]
     descriptive_tokens: bool = True
