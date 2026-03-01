@@ -10,7 +10,7 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
-    {name = "Ziv (Zivuch) Chen"}
+    {name = "The CloakLLM Authors", email = "cloakllm@gmail.com"}
 ]
 keywords = ["llm", "privacy", "pii", "compliance", "eu-ai-act", "litellm", "audit", "security"]
 classifiers = [
