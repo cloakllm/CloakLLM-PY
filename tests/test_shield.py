@@ -345,7 +345,28 @@ class TestEndToEnd:
 
         assert "SEC-2024-0891" not in sanitized
         assert "EMP-004521" not in sanitized
+        assert "[TICKET_0]" in sanitized
+        assert "[EMPLOYEE_ID_0]" in sanitized
         assert token_map.entity_count >= 2
+
+    def test_custom_patterns_override_builtins(self, tmp_path):
+        """Custom patterns take priority over built-in patterns on overlapping spans."""
+        config = ShieldConfig(
+            log_dir=tmp_path / "audit",
+            custom_patterns=[
+                ("CASE_NUMBER", r"CASE-\d{4}-\d{4}"),
+            ],
+        )
+        shield = Shield(config)
+
+        text = "Contact EMP-123456 about CASE-2024-0891"
+        sanitized, token_map = shield.sanitize(text)
+
+        # Custom pattern should win over built-in PHONE for the case number
+        assert "[CASE_NUMBER_0]" in sanitized
+        assert "CASE-2024-0891" not in sanitized
+        # The substring 2024-0891 should NOT be detected as PHONE
+        assert "[PHONE_" not in sanitized
 
     def test_empty_input(self, shield):
         sanitized, token_map = shield.sanitize("")

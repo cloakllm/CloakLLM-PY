@@ -5,6 +5,12 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-03-02
+
+### Fixed
+
+- Custom regex patterns now take priority over built-in patterns during detection, so user-defined patterns correctly match before built-ins claim overlapping spans
+
 ## [0.1.2] - 2026-03-01
 
 ### Fixed
@@ -50,6 +56,7 @@ versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Invalid custom regex patterns now emit a warning instead of crashing
 - Removed unused `category` variable in pattern compilation loop
 
+[0.1.3]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.3
 [0.1.2]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.2
 [0.1.1]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.1
 [0.1.0]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.0

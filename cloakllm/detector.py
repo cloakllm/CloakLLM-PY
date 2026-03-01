@@ -132,13 +132,7 @@ class DetectionEngine:
             "IL_ID": False,  # High false-positive rate, disabled by default
         }
 
-        for name, (_, pattern) in PATTERNS.items():
-            if pattern_map.get(name, True):
-                self._compiled_patterns.append(
-                    (name, re.compile(pattern))
-                )
-
-        # Add custom patterns
+        # Custom patterns first — user-defined patterns take priority
         for name, pattern in self.config.custom_patterns:
             try:
                 compiled = re.compile(pattern)
@@ -156,6 +150,13 @@ class DetectionEngine:
                     f"Invalid custom regex pattern for '{name}': {pattern!r}",
                     RuntimeWarning,
                     stacklevel=2,
+                )
+
+        # Built-in patterns second
+        for name, (_, pattern) in PATTERNS.items():
+            if pattern_map.get(name, True):
+                self._compiled_patterns.append(
+                    (name, re.compile(pattern))
                 )
 
     @property
