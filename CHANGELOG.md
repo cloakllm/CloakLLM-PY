@@ -5,6 +5,14 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-03-04
+
+### Added
+
+- OpenAI SDK middleware: `enable_openai(client)` / `disable_openai(client)` wraps `client.chat.completions.create` with PII sanitization/desanitization (sync, async, and streaming)
+- Per-client patching: multiple OpenAI clients can be enabled/disabled independently
+- 19 new tests for OpenAI middleware (total: 85 tests)
+
 ## [0.1.4] - 2026-03-04
 
 ### Added
@@ -67,6 +75,7 @@ versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Invalid custom regex patterns now emit a warning instead of crashing
 - Removed unused `category` variable in pattern compilation loop
 
+[0.1.5]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.5
 [0.1.4]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.4
 [0.1.3]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.3
 [0.1.2]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.2
