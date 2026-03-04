@@ -17,7 +17,7 @@ python -m spacy download en_core_web_sm
 python -m pytest
 ```
 
-All 35 tests should pass. Python 3.10+ is required.
+All 66 tests should pass. Python 3.10+ is required.
 
 ## Project Structure
 

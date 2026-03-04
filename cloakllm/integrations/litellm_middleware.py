@@ -47,6 +47,7 @@ _SYSTEM_HINT = (
 # Module-level shield instance
 _shield: Optional[Shield] = None
 _original_completion = None
+_original_acompletion = None
 _enabled = False
 
 
@@ -145,7 +146,7 @@ def enable(config: Optional[ShieldConfig] = None):
     Args:
         config: Optional ShieldConfig. Uses defaults if not provided.
     """
-    global _shield, _original_completion, _enabled
+    global _shield, _original_completion, _original_acompletion, _enabled
 
     if _enabled:
         return
@@ -162,6 +163,7 @@ def enable(config: Optional[ShieldConfig] = None):
 
     # Store original functions
     _original_completion = litellm.completion
+    _original_acompletion = litellm.acompletion
 
     # Wrap synchronous completion
     def shielded_completion(*args, **kwargs):
@@ -192,8 +194,36 @@ def enable(config: Optional[ShieldConfig] = None):
                 with _maps_lock:
                     _active_maps.pop(call_key, None)
 
+    # Wrap asynchronous completion
+    async def shielded_acompletion(*args, **kwargs):
+        model = kwargs.get("model") or (args[0] if args else "unknown")
+        messages = kwargs.get("messages") or (args[1] if len(args) > 1 else [])
+        call_key = ""
+
+        if not _should_skip(model):
+            messages, call_key = _sanitize_messages(messages, model)
+            kwargs["messages"] = messages
+
+        try:
+            response = await _original_acompletion(*args, **kwargs)
+
+            if not _should_skip(model) and call_key and hasattr(response, "choices"):
+                for choice in response.choices:
+                    if hasattr(choice, "message") and hasattr(choice.message, "content"):
+                        if choice.message.content:
+                            choice.message.content = _desanitize_response(
+                                choice.message.content, model, call_key
+                            )
+
+            return response
+        finally:
+            if call_key:
+                with _maps_lock:
+                    _active_maps.pop(call_key, None)
+
     # Patch LiteLLM
     litellm.completion = shielded_completion
+    litellm.acompletion = shielded_acompletion
     _enabled = True
 
     # Log that shield is active
@@ -217,6 +247,8 @@ def disable():
         import litellm
         if _original_completion:
             litellm.completion = _original_completion
+        if _original_acompletion:
+            litellm.acompletion = _original_acompletion
     except ImportError:
         pass
 

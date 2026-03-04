@@ -4,9 +4,11 @@ CloakLLM test suite.
 Run: pytest tests/ -v
 """
 
+import asyncio
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -620,3 +622,63 @@ class TestV5CustomPatternReDoS:
         # Evil pattern should have been skipped
         detections = engine.detect("aaaaaaaaaaaa")
         assert not any(d.category == "EVIL" for d in detections)
+
+
+# ──────────────────────────────────────────────
+# LiteLLM Async Integration Tests
+# ──────────────────────────────────────────────
+
+class TestLiteLLMAsync:
+
+    @pytest.mark.asyncio
+    async def test_acompletion_sanitizes_and_desanitizes(self, tmp_path):
+        """enable() patches litellm.acompletion; PII is sanitized/desanitized."""
+        import types
+
+        # Build a minimal litellm mock module
+        litellm_mock = types.ModuleType("litellm")
+
+        # Track what messages the "LLM" sees
+        seen_messages = []
+
+        async def fake_acompletion(*args, **kwargs):
+            seen_messages.append(kwargs.get("messages", []))
+            # Build a response that echoes the first user token
+            choice = MagicMock()
+            choice.message.content = "Got it, I'll email [EMAIL_0] now."
+            resp = MagicMock()
+            resp.choices = [choice]
+            return resp
+
+        litellm_mock.completion = MagicMock()
+        litellm_mock.acompletion = fake_acompletion
+
+        with patch.dict("sys.modules", {"litellm": litellm_mock}):
+            from cloakllm.integrations import litellm_middleware as mw
+
+            # Reset module state
+            mw._enabled = False
+            mw._shield = None
+            mw._original_completion = None
+            mw._original_acompletion = None
+
+            config = ShieldConfig(log_dir=tmp_path / "audit", audit_enabled=False)
+            mw.enable(config=config)
+
+            try:
+                response = await litellm_mock.acompletion(
+                    model="gpt-4",
+                    messages=[{"role": "user", "content": "Email john@acme.com about the project"}],
+                )
+
+                # The mock LLM should have seen sanitized messages (no raw email)
+                assert len(seen_messages) == 1
+                user_content = seen_messages[0][-1]["content"]  # last msg (after system hint)
+                assert "john@acme.com" not in user_content
+                assert "[EMAIL_0]" in user_content
+
+                # The response should be desanitized (real email restored)
+                assert "john@acme.com" in response.choices[0].message.content
+                assert "[EMAIL_0]" not in response.choices[0].message.content
+            finally:
+                mw.disable()

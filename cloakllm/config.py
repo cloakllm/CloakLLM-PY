@@ -56,8 +56,6 @@ class ShieldConfig:
     # --- Tokenization ---
     # Use descriptive tokens like [PERSON_0] vs opaque tokens like [TKN_A3F2]
     descriptive_tokens: bool = True
-    # Preserve format (e.g., replace email with email-shaped token)
-    preserve_format: bool = False
 
     # --- Audit Logging ---
     audit_enabled: bool = True
