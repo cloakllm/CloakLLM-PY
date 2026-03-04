@@ -5,6 +5,15 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-03-04
+
+### Added
+
+- Redaction mode: `ShieldConfig(mode="redact")` for irreversible PII removal — replaces entities with `[CATEGORY_REDACTED]` (e.g., `[EMAIL_REDACTED]`, `[PERSON_REDACTED]`)
+- No token map stored in redact mode — desanitize() is a no-op
+- `mode` field in audit log entries for traceability
+- 8 new tests for redaction mode (total: 93 tests)
+
 ## [0.1.5] - 2026-03-04
 
 ### Added
@@ -75,6 +84,7 @@ versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Invalid custom regex patterns now emit a warning instead of crashing
 - Removed unused `category` variable in pattern compilation loop
 
+[0.1.6]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.6
 [0.1.5]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.5
 [0.1.4]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.4
 [0.1.3]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.3

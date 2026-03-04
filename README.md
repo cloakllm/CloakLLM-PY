@@ -93,6 +93,17 @@ cloaked, token_map = shield.sanitize(
 clean = shield.desanitize(llm_response, token_map)
 ```
 
+### Redaction Mode (irreversible)
+
+```python
+from cloakllm import Shield, ShieldConfig
+
+shield = Shield(ShieldConfig(mode="redact"))
+redacted, _ = shield.sanitize("Email john@acme.com about Sarah Johnson")
+# redacted: "Email [EMAIL_REDACTED] about [PERSON_REDACTED]"
+# No token map stored — cannot be reversed
+```
+
 ### Option D: CLI
 
 ```bash
@@ -222,6 +233,7 @@ CLOAKLLM_OLLAMA_URL=http://localhost:11434
 - [x] LiteLLM middleware integration
 - [x] OpenAI SDK middleware integration
 - [x] CLI tool
+- [x] Redaction / scrubbing mode
 - [ ] OpenTelemetry span emission (with auto-redaction)
 - [ ] RFC 3161 trusted timestamping
 - [ ] Signed audit snapshots

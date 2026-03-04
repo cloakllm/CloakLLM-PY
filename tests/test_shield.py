@@ -682,3 +682,69 @@ class TestLiteLLMAsync:
                 assert "[EMAIL_0]" not in response.choices[0].message.content
             finally:
                 mw.disable()
+
+
+# ──────────────────────────────────────────────
+# Redaction Mode Tests
+# ──────────────────────────────────────────────
+
+class TestRedactionMode:
+
+    def test_redact_replaces_with_category_redacted(self, tmp_path):
+        config = ShieldConfig(mode="redact", log_dir=tmp_path / "audit")
+        shield = Shield(config)
+        text, tmap = shield.sanitize("Email john@acme.com please")
+        assert "[EMAIL_REDACTED]" in text
+        assert "john@acme.com" not in text
+
+    def test_redact_token_map_empty(self, tmp_path):
+        config = ShieldConfig(mode="redact", log_dir=tmp_path / "audit")
+        shield = Shield(config)
+        _, tmap = shield.sanitize("Email john@acme.com please")
+        assert tmap.entity_count == 0
+        assert len(tmap.forward) == 0
+        assert len(tmap.reverse) == 0
+
+    def test_redact_desanitize_noop(self, tmp_path):
+        config = ShieldConfig(mode="redact", log_dir=tmp_path / "audit")
+        shield = Shield(config)
+        text, tmap = shield.sanitize("Email john@acme.com please")
+        result = shield.desanitize(text, tmap)
+        assert result == text  # nothing to reverse
+
+    def test_redact_audit_logs_mode(self, tmp_path):
+        config = ShieldConfig(mode="redact", log_dir=tmp_path / "audit")
+        shield = Shield(config)
+        shield.sanitize("Email john@acme.com please")
+        # Read the audit log
+        log_files = list((tmp_path / "audit").glob("audit_*.jsonl"))
+        assert len(log_files) == 1
+        import json
+        with open(log_files[0]) as f:
+            entry = json.loads(f.readline())
+        assert entry["mode"] == "redact"
+
+    def test_redact_multiple_same_category(self, tmp_path):
+        config = ShieldConfig(mode="redact", log_dir=tmp_path / "audit")
+        shield = Shield(config)
+        text, tmap = shield.sanitize("Email john@acme.com and jane@acme.com")
+        # Both emails should become [EMAIL_REDACTED], not [EMAIL_REDACTED_0] etc.
+        assert text.count("[EMAIL_REDACTED]") == 2
+        assert "john@acme.com" not in text
+        assert "jane@acme.com" not in text
+
+    def test_redact_analyze_unaffected(self, tmp_path):
+        config = ShieldConfig(mode="redact", log_dir=tmp_path / "audit")
+        shield = Shield(config)
+        result = shield.analyze("Email john@acme.com please")
+        assert result["entity_count"] >= 1
+        # analyze returns original text, not redacted
+        assert any(e["text"] == "john@acme.com" for e in result["entities"])
+
+    def test_default_mode_is_tokenize(self):
+        config = ShieldConfig()
+        assert config.mode == "tokenize"
+
+    def test_invalid_mode_rejected(self):
+        with pytest.raises(ValueError, match="Invalid mode"):
+            ShieldConfig(mode="invalid")

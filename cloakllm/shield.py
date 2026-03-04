@@ -65,10 +65,20 @@ class Shield:
         # Detect sensitive entities
         detections = self.detector.detect(text)
 
+        # Ensure token_map has the correct mode
+        if token_map is None:
+            token_map = TokenMap(mode=self.config.mode)
+
         # Tokenize (replace with tokens)
         sanitized, token_map = self.tokenizer.tokenize(text, detections, token_map)
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        # Build tokens_used list — in redact mode, collect from detections
+        if self.config.mode == "redact":
+            tokens_used = list({f"[{d.category}_REDACTED]" for d in detections})
+        else:
+            tokens_used = list(token_map.reverse.keys())
 
         # Audit log
         self.audit.log(
@@ -79,8 +89,9 @@ class Shield:
             provider=provider,
             entity_count=len(detections),
             categories=token_map.categories,
-            tokens_used=list(token_map.reverse.keys()),
+            tokens_used=tokens_used,
             latency_ms=elapsed_ms,
+            mode=self.config.mode,
             metadata=metadata,
         )
 
@@ -124,6 +135,7 @@ class Shield:
             categories=token_map.categories,
             tokens_used=list(token_map.reverse.keys()),
             latency_ms=elapsed_ms,
+            mode=self.config.mode,
             metadata=metadata,
         )
 

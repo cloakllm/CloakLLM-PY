@@ -37,9 +37,14 @@ class TokenMap:
     _counters: dict[str, int] = field(default_factory=dict)
     # All detections that were tokenized
     detections: list[Detection] = field(default_factory=list)
+    # Mode: "tokenize" or "redact"
+    mode: str = "tokenize"
 
     def get_or_create(self, original: str, category: str) -> str:
         """Get existing token for value, or create a new one."""
+        if self.mode == "redact":
+            return f"[{category}_REDACTED]"
+
         # Normalize: strip whitespace for consistent matching
         key = original.strip()
         if key in self.forward:

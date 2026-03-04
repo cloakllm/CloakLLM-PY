@@ -41,6 +41,7 @@ class AuditEntry:
     prompt_hash: str            # SHA-256 of original prompt (for verification without storing content)
     sanitized_hash: str         # SHA-256 of sanitized prompt
     latency_ms: float           # Processing time in milliseconds
+    mode: Optional[str]         # "tokenize" or "redact" (None for legacy entries)
     prev_hash: str              # Hash of previous entry (chain link)
     entry_hash: str             # Hash of this entry (computed from all fields + prev_hash)
     metadata: dict[str, Any]    # Additional context (user_id, session_id, etc.)
@@ -111,6 +112,7 @@ class AuditLogger:
         categories: Optional[dict[str, int]] = None,
         tokens_used: Optional[list[str]] = None,
         latency_ms: float = 0.0,
+        mode: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
     ) -> Optional[AuditEntry]:
         """
@@ -137,6 +139,7 @@ class AuditLogger:
             "prompt_hash": hashlib.sha256(original_text.encode()).hexdigest() if original_text else "",
             "sanitized_hash": hashlib.sha256(sanitized_text.encode()).hexdigest() if sanitized_text else "",
             "latency_ms": round(latency_ms, 2),
+            "mode": mode,
             "prev_hash": self._prev_hash,
             "metadata": metadata or {},
         }

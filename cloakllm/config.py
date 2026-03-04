@@ -54,6 +54,8 @@ class ShieldConfig:
     llm_confidence: float = 0.85
 
     # --- Tokenization ---
+    # Mode: "tokenize" (reversible tokens) or "redact" (irreversible [CATEGORY_REDACTED])
+    mode: str = "tokenize"
     # Use descriptive tokens like [PERSON_0] vs opaque tokens like [TKN_A3F2]
     descriptive_tokens: bool = True
 
@@ -81,3 +83,5 @@ class ShieldConfig:
 
     def __post_init__(self):
         self.log_dir = Path(self.log_dir)
+        if self.mode not in ("tokenize", "redact"):
+            raise ValueError(f"Invalid mode '{self.mode}'. Must be 'tokenize' or 'redact'.")
