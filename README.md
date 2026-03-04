@@ -30,7 +30,7 @@ Your current logging (`logger.info()`) won't survive an audit. CloakLLM provides
 - 🔒 **PII Detection** — Names, emails, SSNs, API keys, IPs, credit cards, IBANs via NER + regex
 - 🎭 **Context-Preserving Cloaking** — `John Smith` → `[PERSON_0]` (the LLM still understands the prompt)
 - ⛓️ **Tamper-Evident Audit Chain** — Every event hash-linked. Any tampering breaks the chain.
-- ⚡ **One-Line LiteLLM Integration** — Drop-in protection for 100+ LLM providers
+- ⚡ **One-Line Middleware** — Drop-in protection for OpenAI SDK and LiteLLM (100+ providers)
 
 ## 🚀 Quick Start
 
@@ -42,11 +42,28 @@ pip install cloakllm[litellm]         # with LiteLLM integration
 python -m spacy download en_core_web_sm
 ```
 
-### Option A: With LiteLLM (one line)
+### Option A: With OpenAI SDK (one line)
+
+```python
+from cloakllm import enable_openai
+from openai import OpenAI
+
+client = OpenAI()
+enable_openai(client)  # Done. All calls are now cloaked.
+
+response = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Email john@acme.com about Project X"}]
+)
+# Provider never sees "john@acme.com" — only "[EMAIL_0]"
+# Response is automatically uncloaked before you see it
+```
+
+### Option B: With LiteLLM (one line)
 
 ```python
 import cloakllm
-cloakllm.enable()  # Done. All LLM calls are now cloaked.
+cloakllm.enable()  # Done. All LiteLLM calls are now cloaked.
 
 import litellm
 response = litellm.completion(
@@ -57,7 +74,7 @@ response = litellm.completion(
 # Response is automatically uncloaked before you see it
 ```
 
-### Option B: Standalone
+### Option C: Standalone
 
 ```python
 from cloakllm import Shield
@@ -76,7 +93,7 @@ cloaked, token_map = shield.sanitize(
 clean = shield.desanitize(llm_response, token_map)
 ```
 
-### Option C: CLI
+### Option D: CLI
 
 ```bash
 # Scan text for sensitive data
@@ -144,7 +161,7 @@ shield = Shield(config=ShieldConfig(
     log_dir="./compliance_audit",
     log_original_values=False,           # Never log original PII
 
-    # LiteLLM
+    # Middleware
     skip_models=["ollama/", "local/"],   # Don't cloak local model calls
 ))
 ```
@@ -203,6 +220,7 @@ CLOAKLLM_OLLAMA_URL=http://localhost:11434
 - [x] Deterministic tokenization
 - [x] Hash-chain audit logging
 - [x] LiteLLM middleware integration
+- [x] OpenAI SDK middleware integration
 - [x] CLI tool
 - [ ] OpenTelemetry span emission (with auto-redaction)
 - [ ] RFC 3161 trusted timestamping

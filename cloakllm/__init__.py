@@ -6,6 +6,12 @@ Usage with LiteLLM:
     import cloakllm
     cloakllm.enable()  # That's it. All LiteLLM calls are now cloaked.
 
+Usage with OpenAI SDK:
+    from cloakllm import enable_openai
+    from openai import OpenAI
+    client = OpenAI()
+    enable_openai(client)  # All chat.completions.create calls are now cloaked.
+
 Standalone usage:
     from cloakllm import Shield
     shield = Shield()
@@ -18,5 +24,18 @@ __version__ = "0.1.4"
 from cloakllm.shield import Shield
 from cloakllm.config import ShieldConfig
 from cloakllm.integrations.litellm_middleware import enable, disable, get_shield, is_enabled
+from cloakllm.integrations.openai_middleware import (
+    enable as enable_openai,
+    disable as disable_openai,
+)
 
-__all__ = ["Shield", "ShieldConfig", "enable", "disable", "get_shield", "is_enabled"]
+__all__ = [
+    "Shield",
+    "ShieldConfig",
+    "enable",
+    "disable",
+    "get_shield",
+    "is_enabled",
+    "enable_openai",
+    "disable_openai",
+]
