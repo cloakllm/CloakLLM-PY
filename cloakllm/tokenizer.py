@@ -71,12 +71,45 @@ class TokenMap:
             counts[det.category] = counts.get(det.category, 0) + 1
         return counts
 
+    @property
+    def entity_details(self) -> list[dict]:
+        """Per-entity metadata list (PII-safe — no original text)."""
+        details = []
+        for det in self.detections:
+            # Look up the token assigned to this detection
+            if self.mode == "redact":
+                token = f"[{det.category}_REDACTED]"
+            else:
+                key = det.text.strip()
+                token = self.forward.get(key, "")
+            details.append({
+                "category": det.category,
+                "start": det.start,
+                "end": det.end,
+                "length": det.end - det.start,
+                "confidence": det.confidence,
+                "source": det.source,
+                "token": token,
+            })
+        details.sort(key=lambda d: d["start"])
+        return details
+
     def to_summary(self) -> dict:
         """Non-sensitive summary for logging (no original values)."""
         return {
             "entity_count": self.entity_count,
             "categories": self.categories,
             "tokens": list(self.reverse.keys()),
+        }
+
+    def to_report(self) -> dict:
+        """Extended summary with per-entity details (PII-safe)."""
+        return {
+            "entity_count": self.entity_count,
+            "categories": self.categories,
+            "tokens": list(self.reverse.keys()),
+            "mode": self.mode,
+            "entity_details": self.entity_details,
         }
 
 

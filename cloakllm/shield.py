@@ -92,6 +92,7 @@ class Shield:
             tokens_used=tokens_used,
             latency_ms=elapsed_ms,
             mode=self.config.mode,
+            entity_details=token_map.entity_details,
             metadata=metadata,
         )
 
@@ -136,6 +137,7 @@ class Shield:
             tokens_used=list(token_map.reverse.keys()),
             latency_ms=elapsed_ms,
             mode=self.config.mode,
+            entity_details=token_map.entity_details,
             metadata=metadata,
         )
 

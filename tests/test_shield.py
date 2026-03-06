@@ -748,3 +748,79 @@ class TestRedactionMode:
     def test_invalid_mode_rejected(self):
         with pytest.raises(ValueError, match="Invalid mode"):
             ShieldConfig(mode="invalid")
+
+
+# ──────────────────────────────────────────────
+# Entity Details Tests
+# ──────────────────────────────────────────────
+
+class TestEntityDetails:
+
+    def test_token_map_entity_details(self, shield):
+        """entity_details has correct fields, sorted by start, no text key."""
+        _, token_map = shield.sanitize("Email john@acme.com, SSN 123-45-6789")
+        details = token_map.entity_details
+        assert len(details) >= 2
+        # Check fields
+        for d in details:
+            assert set(d.keys()) == {"category", "start", "end", "length", "confidence", "source", "token"}
+            assert "text" not in d
+            assert d["length"] == d["end"] - d["start"]
+            assert d["token"].startswith("[")
+        # Check sorted by start
+        starts = [d["start"] for d in details]
+        assert starts == sorted(starts)
+
+    def test_token_map_to_report(self, shield):
+        """to_report() returns superset of to_summary() plus entity_details and mode."""
+        _, token_map = shield.sanitize("Email john@acme.com")
+        report = token_map.to_report()
+        summary = token_map.to_summary()
+        assert report["entity_count"] == summary["entity_count"]
+        assert report["categories"] == summary["categories"]
+        assert report["tokens"] == summary["tokens"]
+        assert "mode" in report
+        assert "entity_details" in report
+        assert len(report["entity_details"]) >= 1
+
+    def test_entity_details_in_audit_log(self, shield, config):
+        """Audit log JSONL entries include entity_details array."""
+        shield.sanitize("Email john@acme.com")
+        log_file = list(config.log_dir.glob("audit_*.jsonl"))[0]
+        with open(log_file) as f:
+            entry = json.loads(f.readline())
+        assert "entity_details" in entry
+        assert isinstance(entry["entity_details"], list)
+        assert len(entry["entity_details"]) >= 1
+        assert entry["entity_details"][0]["category"] == "EMAIL"
+
+    def test_entity_details_no_pii_in_audit(self, shield, config):
+        """No original PII text appears in audit entity_details."""
+        shield.sanitize("Email john@acme.com, SSN 123-45-6789")
+        log_file = list(config.log_dir.glob("audit_*.jsonl"))[0]
+        with open(log_file) as f:
+            content = f.read()
+        assert "john@acme.com" not in content
+        assert "123-45-6789" not in content
+
+    def test_entity_details_redact_mode(self, tmp_path):
+        """In redact mode, tokens show [CATEGORY_REDACTED]."""
+        config = ShieldConfig(mode="redact", log_dir=tmp_path / "audit")
+        shield = Shield(config)
+        _, token_map = shield.sanitize("Email john@acme.com")
+        details = token_map.entity_details
+        assert len(details) >= 1
+        assert details[0]["token"] == "[EMAIL_REDACTED]"
+
+    def test_entity_details_empty_for_no_pii(self, shield):
+        """entity_details is empty when no PII is detected."""
+        _, token_map = shield.sanitize("What is the weather like today?")
+        assert token_map.entity_details == []
+
+    def test_audit_chain_valid_with_entity_details(self, shield):
+        """Hash chain remains valid with entity_details included."""
+        shield.sanitize("Email john@acme.com")
+        shield.sanitize("SSN 123-45-6789")
+        shield.sanitize("No PII here")
+        is_valid, errors = shield.verify_audit()
+        assert is_valid, f"Chain errors: {errors}"

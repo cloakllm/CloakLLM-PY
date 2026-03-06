@@ -104,6 +104,26 @@ redacted, _ = shield.sanitize("Email john@acme.com about Sarah Johnson")
 # No token map stored — cannot be reversed
 ```
 
+### Entity Details (compliance metadata)
+
+```python
+from cloakllm import Shield
+
+shield = Shield()
+sanitized, token_map = shield.sanitize("Email john@acme.com, SSN 123-45-6789")
+
+# Per-entity metadata (no original text — PII-safe)
+token_map.entity_details
+# [
+#   {"category": "EMAIL", "start": 6, "end": 19, "length": 13, "confidence": 0.95, "source": "regex", "token": "[EMAIL_0]"},
+#   {"category": "SSN", "start": 25, "end": 36, "length": 11, "confidence": 0.95, "source": "regex", "token": "[SSN_0]"}
+# ]
+
+# Full report for dashboards
+token_map.to_report()
+# {"entity_count": 2, "categories": {...}, "tokens": [...], "mode": "tokenize", "entity_details": [...]}
+```
+
 ### Option D: CLI
 
 ```bash
@@ -133,6 +153,11 @@ Every cloaking event is recorded in a hash-chained append-only log:
   "tokens_used": ["[PERSON_0]", "[EMAIL_0]", "[SSN_0]"],
   "prompt_hash": "sha256:9f86d0...",
   "sanitized_hash": "sha256:a3f2b1...",
+  "entity_details": [
+    {"category": "PERSON", "start": 0, "end": 10, "length": 10, "confidence": 0.85, "source": "spacy", "token": "[PERSON_0]"},
+    {"category": "EMAIL", "start": 12, "end": 25, "length": 13, "confidence": 0.95, "source": "regex", "token": "[EMAIL_0]"},
+    {"category": "SSN", "start": 27, "end": 38, "length": 11, "confidence": 0.95, "source": "regex", "token": "[SSN_0]"}
+  ],
   "latency_ms": 4.2,
   "prev_hash": "sha256:7c4d2e...",
   "entry_hash": "sha256:b5e8f3..."
@@ -234,6 +259,7 @@ CLOAKLLM_OLLAMA_URL=http://localhost:11434
 - [x] OpenAI SDK middleware integration
 - [x] CLI tool
 - [x] Redaction / scrubbing mode
+- [x] Field-level PII metadata (entity_details)
 - [ ] OpenTelemetry span emission (with auto-redaction)
 - [ ] RFC 3161 trusted timestamping
 - [ ] Signed audit snapshots

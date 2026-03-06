@@ -5,6 +5,15 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-03-06
+
+### Added
+
+- `TokenMap.entity_details` property — per-entity metadata (category, start, end, length, confidence, source, token) without original text
+- `TokenMap.to_report()` — extended summary with entity_details and mode
+- `entity_details` field in audit log entries (included in hash chain)
+- 7 new tests for entity details
+
 ## [0.1.6] - 2026-03-04
 
 ### Added
@@ -84,6 +93,7 @@ versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Invalid custom regex patterns now emit a warning instead of crashing
 - Removed unused `category` variable in pattern compilation loop
 
+[0.1.7]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.7
 [0.1.6]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.6
 [0.1.5]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.5
 [0.1.4]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.4
