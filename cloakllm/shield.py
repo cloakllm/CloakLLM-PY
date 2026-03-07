@@ -98,6 +98,139 @@ class Shield:
 
         return sanitized, token_map
 
+    def sanitize_batch(
+        self,
+        texts: list[str],
+        token_map: Optional[TokenMap] = None,
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> tuple[list[str], TokenMap]:
+        """
+        Sanitize multiple texts with a shared token map and single audit entry.
+
+        Args:
+            texts: List of texts potentially containing sensitive data
+            token_map: Existing TokenMap for multi-turn conversations
+            model: LLM model name (for audit logging)
+            provider: LLM provider name (for audit logging)
+            metadata: Additional context to log
+
+        Returns:
+            (list_of_sanitized_texts, token_map)
+        """
+        start_time = time.perf_counter()
+
+        if token_map is None:
+            token_map = TokenMap(mode=self.config.mode)
+
+        sanitized_texts = []
+        all_entity_details = []
+        total_detections = 0
+
+        for text_index, text in enumerate(texts):
+            detections = self.detector.detect(text)
+            sanitized, token_map = self.tokenizer.tokenize(text, detections, token_map)
+            sanitized_texts.append(sanitized)
+            total_detections += len(detections)
+
+            # Build entity details with text_index
+            for det in detections:
+                if self.config.mode == "redact":
+                    token = f"[{det.category}_REDACTED]"
+                else:
+                    key = det.text.strip()
+                    token = token_map.forward.get(key, "")
+                all_entity_details.append({
+                    "category": det.category,
+                    "start": det.start,
+                    "end": det.end,
+                    "length": det.end - det.start,
+                    "confidence": det.confidence,
+                    "source": det.source,
+                    "token": token,
+                    "text_index": text_index,
+                })
+
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        # Build tokens_used list
+        if self.config.mode == "redact":
+            tokens_used = list({d["token"] for d in all_entity_details})
+        else:
+            tokens_used = list(token_map.reverse.keys())
+
+        # Build per-text hashes for audit metadata
+        import hashlib
+        audit_metadata = dict(metadata) if metadata else {}
+        audit_metadata["prompt_hashes"] = [
+            hashlib.sha256(t.encode()).hexdigest() for t in texts
+        ]
+        audit_metadata["sanitized_hashes"] = [
+            hashlib.sha256(t.encode()).hexdigest() for t in sanitized_texts
+        ]
+
+        self.audit.log(
+            event_type="sanitize_batch",
+            original_text="",
+            sanitized_text="",
+            model=model,
+            provider=provider,
+            entity_count=total_detections,
+            categories=token_map.categories,
+            tokens_used=tokens_used,
+            latency_ms=elapsed_ms,
+            mode=self.config.mode,
+            entity_details=all_entity_details,
+            metadata=audit_metadata,
+        )
+
+        return sanitized_texts, token_map
+
+    def desanitize_batch(
+        self,
+        texts: list[str],
+        token_map: TokenMap,
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> list[str]:
+        """
+        Desanitize multiple texts using a shared token map.
+
+        Args:
+            texts: List of texts containing tokens to restore
+            token_map: TokenMap from the sanitize step
+            model: LLM model name (for audit logging)
+            provider: LLM provider name (for audit logging)
+            metadata: Additional context to log
+
+        Returns:
+            List of desanitized texts with original values restored
+        """
+        start_time = time.perf_counter()
+
+        results = [self.tokenizer.detokenize(text, token_map) for text in texts]
+
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        self.audit.log(
+            event_type="desanitize_batch",
+            original_text="",
+            sanitized_text="",
+            model=model,
+            provider=provider,
+            entity_count=token_map.entity_count,
+            categories=token_map.categories,
+            tokens_used=list(token_map.reverse.keys()),
+            latency_ms=elapsed_ms,
+            mode=self.config.mode,
+            entity_details=token_map.entity_details,
+            metadata=metadata,
+        )
+
+        return results
+
     def desanitize(
         self,
         text: str,

@@ -824,3 +824,104 @@ class TestEntityDetails:
         shield.sanitize("No PII here")
         is_valid, errors = shield.verify_audit()
         assert is_valid, f"Chain errors: {errors}"
+
+
+# ──────────────────────────────────────────────
+# Batch Processing Tests
+# ──────────────────────────────────────────────
+
+class TestBatch:
+
+    def test_basic_batch(self, shield):
+        texts = ["Email john@acme.com", "SSN 123-45-6789"]
+        sanitized, token_map = shield.sanitize_batch(texts)
+        assert len(sanitized) == 2
+        assert "[EMAIL_0]" in sanitized[0]
+        assert "[SSN_0]" in sanitized[1]
+        assert "john@acme.com" not in sanitized[0]
+        assert "123-45-6789" not in sanitized[1]
+
+    def test_shared_tokens_across_texts(self, shield):
+        texts = [
+            "Contact john@acme.com about the project",
+            "Follow up with john@acme.com tomorrow",
+        ]
+        sanitized, token_map = shield.sanitize_batch(texts)
+        assert "[EMAIL_0]" in sanitized[0]
+        assert "[EMAIL_0]" in sanitized[1]
+        # Same email in both texts should map to the same token
+        assert "john@acme.com" in token_map.forward
+
+    def test_single_audit_entry(self, shield, config):
+        texts = ["Email john@acme.com", "SSN 123-45-6789"]
+        shield.sanitize_batch(texts)
+        log_file = list(config.log_dir.glob("audit_*.jsonl"))[0]
+        with open(log_file) as f:
+            lines = [l for l in f.readlines() if l.strip()]
+        assert len(lines) == 1
+        entry = json.loads(lines[0])
+        assert entry["event_type"] == "sanitize_batch"
+        assert "prompt_hashes" in entry["metadata"]
+        assert "sanitized_hashes" in entry["metadata"]
+        assert len(entry["metadata"]["prompt_hashes"]) == 2
+
+    def test_entity_details_text_index(self, shield):
+        texts = ["Email john@acme.com", "SSN 123-45-6789"]
+        shield.sanitize_batch(texts)
+        # Get entity_details from the audit log
+        log_file = list(shield.config.log_dir.glob("audit_*.jsonl"))[0]
+        with open(log_file) as f:
+            entry = json.loads(f.readline())
+        details = entry["entity_details"]
+        assert len(details) >= 2
+        text_indices = {d["text_index"] for d in details}
+        assert 0 in text_indices
+        assert 1 in text_indices
+        for d in details:
+            assert "text_index" in d
+
+    def test_empty_list(self, shield):
+        sanitized, token_map = shield.sanitize_batch([])
+        assert sanitized == []
+        assert token_map.entity_count == 0
+
+    def test_no_pii_texts(self, shield):
+        texts = ["Hello world", "Nice weather today"]
+        sanitized, token_map = shield.sanitize_batch(texts)
+        assert sanitized == texts
+        assert token_map.entity_count == 0
+
+    def test_existing_token_map_reuse(self, shield):
+        _, token_map = shield.sanitize("Email john@acme.com")
+        texts = ["Remind john@acme.com", "Also notify jane@acme.com"]
+        sanitized, token_map = shield.sanitize_batch(texts, token_map=token_map)
+        assert "[EMAIL_0]" in sanitized[0]  # same token for john@acme.com
+        assert "[EMAIL_1]" in sanitized[1]  # new token for jane@acme.com
+
+    def test_redact_mode(self, tmp_path):
+        config = ShieldConfig(mode="redact", log_dir=tmp_path / "audit")
+        shield = Shield(config)
+        texts = ["Email john@acme.com", "Email jane@acme.com"]
+        sanitized, token_map = shield.sanitize_batch(texts)
+        assert "[EMAIL_REDACTED]" in sanitized[0]
+        assert "[EMAIL_REDACTED]" in sanitized[1]
+        assert "john@acme.com" not in sanitized[0]
+
+    def test_desanitize_batch(self, shield):
+        texts = ["Email john@acme.com", "Server 10.0.0.1"]
+        sanitized, token_map = shield.sanitize_batch(texts)
+        responses = [
+            "Sent to [EMAIL_0]",
+            "Configured [IP_ADDRESS_0]",
+        ]
+        restored = shield.desanitize_batch(responses, token_map)
+        assert len(restored) == 2
+        assert "john@acme.com" in restored[0]
+        assert "10.0.0.1" in restored[1]
+
+    def test_audit_chain_valid_with_batch(self, shield):
+        shield.sanitize("Email john@acme.com")
+        shield.sanitize_batch(["SSN 123-45-6789", "Phone 555-123-4567"])
+        shield.desanitize_batch(["test"], TokenMap())
+        is_valid, errors = shield.verify_audit()
+        assert is_valid, f"Chain errors: {errors}"

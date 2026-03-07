@@ -5,6 +5,15 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-03-07
+
+### Added
+
+- Batch processing API: `shield.sanitize_batch(texts)` / `shield.desanitize_batch(texts, token_map)` — shared token map across texts, single audit entry per batch
+- `sanitize_batch` audit entries include per-text hashes in `metadata.prompt_hashes` / `metadata.sanitized_hashes`
+- Batch entity_details include `text_index` field indicating which text each entity came from
+- 10 new tests for batch processing (total: 110 tests)
+
 ## [0.1.7] - 2026-03-06
 
 ### Added
@@ -93,6 +102,7 @@ versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Invalid custom regex patterns now emit a warning instead of crashing
 - Removed unused `category` variable in pattern compilation loop
 
+[0.1.8]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.8
 [0.1.7]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.7
 [0.1.6]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.6
 [0.1.5]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.5
