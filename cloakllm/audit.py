@@ -43,6 +43,7 @@ class AuditEntry:
     latency_ms: float           # Processing time in milliseconds
     mode: Optional[str]         # "tokenize" or "redact" (None for legacy entries)
     entity_details: list[dict]  # Per-entity metadata (PII-safe)
+    timing: Optional[dict[str, float]]  # Per-pass timing breakdown (ms)
     prev_hash: str              # Hash of previous entry (chain link)
     entry_hash: str             # Hash of this entry (computed from all fields + prev_hash)
     metadata: dict[str, Any]    # Additional context (user_id, session_id, etc.)
@@ -115,6 +116,7 @@ class AuditLogger:
         latency_ms: float = 0.0,
         mode: Optional[str] = None,
         entity_details: Optional[list[dict]] = None,
+        timing: Optional[dict[str, float]] = None,
         metadata: Optional[dict[str, Any]] = None,
     ) -> Optional[AuditEntry]:
         """
@@ -143,6 +145,7 @@ class AuditLogger:
             "latency_ms": round(latency_ms, 2),
             "mode": mode,
             "entity_details": entity_details or [],
+            "timing": timing,
             "prev_hash": self._prev_hash,
             "metadata": metadata or {},
         }

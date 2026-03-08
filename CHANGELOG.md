@@ -5,6 +5,16 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-03-08
+
+### Added
+
+- Per-pass timing breakdown in audit log entries: `timing` object with `total_ms`, `detection_ms`, `regex_ms`, `ner_ms`, `llm_ms`, `tokenization_ms`
+- `shield.metrics()` — accumulated performance metrics (call counts, total/avg latency, per-pass detection timing, entity counts by category)
+- `shield.reset_metrics()` — clear accumulated metrics
+- `DetectionEngine.detect()` now returns `(detections, timing)` tuple with per-pass millisecond breakdowns
+- 10 new tests for metrics and timing (total: 119 tests)
+
 ## [0.1.8] - 2026-03-07
 
 ### Added
@@ -102,6 +112,7 @@ versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Invalid custom regex patterns now emit a warning instead of crashing
 - Removed unused `category` variable in pattern compilation loop
 
+[0.1.9]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.9
 [0.1.8]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.8
 [0.1.7]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.7
 [0.1.6]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.6

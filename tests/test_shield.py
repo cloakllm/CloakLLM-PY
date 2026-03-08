@@ -71,7 +71,7 @@ def audit_logger(config):
 class TestDetection:
 
     def test_detect_email(self, detector):
-        detections = detector.detect("Send to john@acme.com please")
+        detections, _ = detector.detect("Send to john@acme.com please")
         emails = [d for d in detections if d.category == "EMAIL"]
         assert len(emails) == 1
         assert emails[0].text == "john@acme.com"
@@ -79,62 +79,62 @@ class TestDetection:
 
     def test_detect_multiple_emails(self, detector):
         text = "CC alice@foo.org and bob@bar.io on this"
-        detections = detector.detect(text)
+        detections, _ = detector.detect(text)
         emails = [d for d in detections if d.category == "EMAIL"]
         assert len(emails) == 2
 
     def test_detect_ssn(self, detector):
-        detections = detector.detect("SSN: 123-45-6789")
+        detections, _ = detector.detect("SSN: 123-45-6789")
         ssns = [d for d in detections if d.category == "SSN"]
         assert len(ssns) == 1
         assert ssns[0].text == "123-45-6789"
 
     def test_detect_credit_card_visa(self, detector):
-        detections = detector.detect("Card: 4111111111111111")
+        detections, _ = detector.detect("Card: 4111111111111111")
         cards = [d for d in detections if d.category == "CREDIT_CARD"]
         assert len(cards) == 1
 
     def test_detect_ip_address(self, detector):
-        detections = detector.detect("Server at 192.168.1.100")
+        detections, _ = detector.detect("Server at 192.168.1.100")
         ips = [d for d in detections if d.category == "IP_ADDRESS"]
         assert len(ips) == 1
         assert ips[0].text == "192.168.1.100"
 
     def test_detect_api_key(self, detector):
-        detections = detector.detect("Use key sk-abc123def456ghi789jkl012")
+        detections, _ = detector.detect("Use key sk-abc123def456ghi789jkl012")
         keys = [d for d in detections if d.category == "API_KEY"]
         assert len(keys) == 1
 
     def test_detect_aws_key(self, detector):
-        detections = detector.detect("AWS key: AKIAIOSFODNN7EXAMPLE")
+        detections, _ = detector.detect("AWS key: AKIAIOSFODNN7EXAMPLE")
         keys = [d for d in detections if d.category == "AWS_KEY"]
         assert len(keys) == 1
 
     @requires_ner
     def test_detect_person_ner(self, detector):
-        detections = detector.detect("Meeting with John Smith tomorrow at Google HQ")
+        detections, _ = detector.detect("Meeting with John Smith tomorrow at Google HQ")
         persons = [d for d in detections if d.category == "PERSON"]
         assert len(persons) >= 1
         assert any("John" in d.text for d in persons)
 
     @requires_ner
     def test_detect_org_ner(self, detector):
-        detections = detector.detect("I work at Microsoft in their Azure division")
+        detections, _ = detector.detect("I work at Microsoft in their Azure division")
         orgs = [d for d in detections if d.category == "ORG"]
         assert len(orgs) >= 1
 
     def test_no_false_positives_on_clean_text(self, detector):
-        detections = detector.detect("Please summarize this article about climate change")
+        detections, _ = detector.detect("Please summarize this article about climate change")
         # Should have zero or very few detections
         assert len(detections) <= 1  # NER might catch "climate change" as misc
 
     def test_detections_sorted_by_position(self, detector):
-        detections = detector.detect("Email john@a.com and jane@b.com now")
+        detections, _ = detector.detect("Email john@a.com and jane@b.com now")
         positions = [d.start for d in detections]
         assert positions == sorted(positions)
 
     def test_no_overlap_between_regex_and_ner(self, detector):
-        detections = detector.detect("Contact john.smith@acme.com")
+        detections, _ = detector.detect("Contact john.smith@acme.com")
         spans = [(d.start, d.end) for d in detections]
         for i, (s1, e1) in enumerate(spans):
             for j, (s2, e2) in enumerate(spans):
@@ -393,7 +393,7 @@ class TestRegressions:
         # The detector should not produce overlapping detections even when
         # a broader regex could engulf a narrower match.
         text = "Contact john@acme.com please"
-        detections = detector.detect(text)
+        detections, _ = detector.detect(text)
         spans = [(d.start, d.end) for d in detections]
         # Verify no two spans overlap (including engulfing)
         for i, (s1, e1) in enumerate(spans):
@@ -429,7 +429,7 @@ class TestRegressions:
             # Should have warned about the bad pattern
             assert any("Invalid custom regex" in str(warning.message) for warning in w)
         # Good pattern should still work
-        detections = engine.detect("See TICKET-12345")
+        detections, _ = engine.detect("See TICKET-12345")
         assert any(d.category == "GOOD_PATTERN" for d in detections)
 
     def test_phone_validation_strips_dots(self, detector):
@@ -437,7 +437,7 @@ class TestRegressions:
         # A very short dotted sequence should NOT be detected as a phone
         # (This tests that dots are stripped in the length check)
         text = "version 1.2.3"
-        detections = detector.detect(text)
+        detections, _ = detector.detect(text)
         phones = [d for d in detections if d.category == "PHONE"]
         # Short dot-separated numbers should not be detected as phones
         for p in phones:
@@ -508,20 +508,20 @@ class TestV3PhoneReDoS:
         import time
         adversarial = "9" * 50 + "X"
         start = time.monotonic()
-        detector.detect(adversarial)
+        detector.detect(adversarial)  # returns (detections, timing)
         elapsed = time.monotonic() - start
         assert elapsed < 3.0, f"Detection took {elapsed:.2f}s, expected < 3s"
 
     def test_still_detects_international_phone(self, detector):
-        detections = detector.detect("Call +1-555-0142")
+        detections, _ = detector.detect("Call +1-555-0142")
         assert any(d.category == "PHONE" for d in detections)
 
     def test_still_detects_parenthesized_phone(self, detector):
-        detections = detector.detect("Call (555) 123-4567")
+        detections, _ = detector.detect("Call (555) 123-4567")
         assert any(d.category == "PHONE" for d in detections)
 
     def test_still_detects_dashed_phone(self, detector):
-        detections = detector.detect("Call 555-123-4567")
+        detections, _ = detector.detect("Call 555-123-4567")
         assert any(d.category == "PHONE" for d in detections)
 
 
@@ -617,10 +617,10 @@ class TestV5CustomPatternReDoS:
 
         assert any("safety check" in str(warning.message) for warning in caught)
         # Safe pattern should still work
-        detections = engine.detect("See SAFE-12345")
+        detections, _ = engine.detect("See SAFE-12345")
         assert any(d.category == "SAFE" for d in detections)
         # Evil pattern should have been skipped
-        detections = engine.detect("aaaaaaaaaaaa")
+        detections, _ = engine.detect("aaaaaaaaaaaa")
         assert not any(d.category == "EVIL" for d in detections)
 
 
@@ -923,5 +923,107 @@ class TestBatch:
         shield.sanitize("Email john@acme.com")
         shield.sanitize_batch(["SSN 123-45-6789", "Phone 555-123-4567"])
         shield.desanitize_batch(["test"], TokenMap())
+        is_valid, errors = shield.verify_audit()
+        assert is_valid, f"Chain errors: {errors}"
+
+
+# ──────────────────────────────────────────────
+# Metrics & Timing Tests
+# ──────────────────────────────────────────────
+
+class TestMetrics:
+
+    def test_timing_in_audit_entry(self, shield, config):
+        """Audit log entries include timing object with per-pass breakdowns."""
+        shield.sanitize("Email john@acme.com")
+        log_file = list(config.log_dir.glob("audit_*.jsonl"))[0]
+        with open(log_file) as f:
+            entry = json.loads(f.readline())
+        assert "timing" in entry
+        timing = entry["timing"]
+        assert "total_ms" in timing
+        assert "detection_ms" in timing
+        assert "regex_ms" in timing
+        assert "ner_ms" in timing
+        assert "llm_ms" in timing
+        assert "tokenization_ms" in timing
+        assert timing["total_ms"] >= 0
+        assert timing["regex_ms"] >= 0
+
+    def test_timing_in_desanitize_audit(self, shield, config):
+        """Desanitize audit entries include timing."""
+        _, token_map = shield.sanitize("Email john@acme.com")
+        shield.desanitize("[EMAIL_0]", token_map)
+        log_file = list(config.log_dir.glob("audit_*.jsonl"))[0]
+        with open(log_file) as f:
+            lines = [l for l in f.readlines() if l.strip()]
+        entry = json.loads(lines[1])
+        assert "timing" in entry
+        assert "total_ms" in entry["timing"]
+        assert "tokenization_ms" in entry["timing"]
+
+    def test_timing_in_batch_audit(self, shield, config):
+        """Batch audit entries include timing."""
+        shield.sanitize_batch(["Email john@acme.com", "SSN 123-45-6789"])
+        log_file = list(config.log_dir.glob("audit_*.jsonl"))[0]
+        with open(log_file) as f:
+            entry = json.loads(f.readline())
+        timing = entry["timing"]
+        assert "total_ms" in timing
+        assert "detection_ms" in timing
+        assert "regex_ms" in timing
+        assert "tokenization_ms" in timing
+
+    def test_metrics_accumulation(self, shield):
+        """metrics() returns accumulated stats after multiple calls."""
+        shield.sanitize("Email john@acme.com")
+        shield.sanitize("SSN 123-45-6789")
+        m = shield.metrics()
+        assert m["calls"]["sanitize"] == 2
+        assert m["total_ms"] > 0
+        assert m["avg_ms"] > 0
+        assert m["entities_detected"] >= 2
+        assert "EMAIL" in m["categories"]
+        assert m["detection"]["regex_ms"] >= 0
+        assert m["tokenization_ms"] >= 0
+
+    def test_metrics_includes_batch_calls(self, shield):
+        """metrics() counts batch calls separately."""
+        shield.sanitize_batch(["Email john@acme.com", "SSN 123-45-6789"])
+        m = shield.metrics()
+        assert m["calls"]["sanitize_batch"] == 1
+        assert m["entities_detected"] >= 2
+
+    def test_metrics_includes_desanitize(self, shield):
+        """metrics() tracks desanitize calls."""
+        _, token_map = shield.sanitize("Email john@acme.com")
+        shield.desanitize("[EMAIL_0]", token_map)
+        m = shield.metrics()
+        assert m["calls"]["desanitize"] == 1
+
+    def test_reset_metrics(self, shield):
+        """reset_metrics() clears all accumulators."""
+        shield.sanitize("Email john@acme.com")
+        shield.reset_metrics()
+        m = shield.metrics()
+        assert m["calls"]["sanitize"] == 0
+        assert m["total_ms"] == 0.0
+        assert m["entities_detected"] == 0
+        assert m["categories"] == {}
+
+    def test_detector_returns_timing(self, detector):
+        """DetectionEngine.detect() returns timing dict with per-pass keys."""
+        _, timing = detector.detect("Email john@acme.com, call 555-123-4567")
+        assert "regex_ms" in timing
+        assert "ner_ms" in timing
+        assert "llm_ms" in timing
+        assert all(isinstance(v, float) for v in timing.values())
+
+    def test_audit_chain_valid_with_timing(self, shield):
+        """Hash chain remains valid with timing field included."""
+        shield.sanitize("Email john@acme.com")
+        shield.sanitize("SSN 123-45-6789")
+        _, token_map = shield.sanitize("Phone 555-123-4567")
+        shield.desanitize("[PHONE_0]", token_map)
         is_valid, errors = shield.verify_audit()
         assert is_valid, f"Chain errors: {errors}"

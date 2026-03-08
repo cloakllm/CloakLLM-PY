@@ -8,6 +8,7 @@ Designed for speed: regex runs first (fast), NER runs second (accurate).
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
 
 import warnings
@@ -206,15 +207,18 @@ class DetectionEngine:
                 )
         return self._nlp
 
-    def detect(self, text: str) -> list[Detection]:
+    def detect(self, text: str) -> tuple[list[Detection], dict[str, float]]:
         """
         Detect all sensitive entities in text.
-        Returns detections sorted by start position (earliest first).
+        Returns (detections, timing) where detections are sorted by start
+        position and timing contains per-pass millisecond breakdowns.
         """
         detections: list[Detection] = []
         covered_spans: list[tuple[int, int]] = []
+        timing: dict[str, float] = {}
 
         # --- Pass 1: Regex (fast, high precision for structured data) ---
+        t0 = time.perf_counter()
         for name, pattern in self._compiled_patterns:
             for match in pattern.finditer(text):
                 start, end = match.start(), match.end()
@@ -233,8 +237,10 @@ class DetectionEngine:
                     source="regex",
                 ))
                 covered_spans.append((start, end))
+        timing["regex_ms"] = round((time.perf_counter() - t0) * 1000, 2)
 
         # --- Pass 2: spaCy NER (slower, catches names/orgs/locations) ---
+        t0 = time.perf_counter()
         doc = self.nlp(text)
         for ent in doc.ents:
             if ent.label_ not in self.config.ner_entity_types:
@@ -255,12 +261,15 @@ class DetectionEngine:
                 source="ner",
             ))
             covered_spans.append((start, end))
+        timing["ner_ms"] = round((time.perf_counter() - t0) * 1000, 2)
 
         # --- Pass 3: Local LLM (semantic/contextual PII, opt-in) ---
+        t0 = time.perf_counter()
         if self._llm_detector is not None:
             llm_detections = self._llm_detector.detect(text, covered_spans)
             detections.extend(llm_detections)
+        timing["llm_ms"] = round((time.perf_counter() - t0) * 1000, 2)
 
         # Sort by start position (important for tokenization)
         detections.sort(key=lambda d: d.start)
-        return detections
+        return detections, timing
