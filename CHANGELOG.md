@@ -5,6 +5,16 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-09
+
+### Added
+
+- Custom LLM detection categories: `ShieldConfig(custom_llm_categories=[("PATIENT_ID", "Hospital patient ID")])` — define domain-specific semantic PII types for Ollama-based detection
+- Category name validation: must match `^[A-Z][A-Z0-9_]*$`
+- Excluded category conflict detection with warnings
+- Category description hints injected into Ollama system prompt
+- 7 new tests for custom LLM categories (total: 126 tests)
+
 ## [0.1.9] - 2026-03-08
 
 ### Added
@@ -112,6 +122,7 @@ versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Invalid custom regex patterns now emit a warning instead of crashing
 - Removed unused `category` variable in pattern compilation loop
 
+[0.2.0]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.2.0
 [0.1.9]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.9
 [0.1.8]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.8
 [0.1.7]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.7

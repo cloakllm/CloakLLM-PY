@@ -19,7 +19,7 @@ Standalone usage:
     # sanitized: "Send email to [EMAIL_0] about [ORG_0]"
 """
 
-__version__ = "0.1.9"
+__version__ = "0.2.0"
 
 from cloakllm.shield import Shield
 from cloakllm.config import ShieldConfig

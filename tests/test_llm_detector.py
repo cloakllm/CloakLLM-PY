@@ -331,3 +331,117 @@ class TestErrorHandling:
             results = detector.detect("Some text", [])
 
         assert results == []
+
+
+# ──────────────────────────────────────────────
+# Custom Categories Tests
+# ──────────────────────────────────────────────
+
+class TestCustomCategories:
+
+    def test_custom_category_detected(self):
+        """Custom category returned by LLM is accepted."""
+        config = ShieldConfig(
+            llm_detection=True,
+            custom_llm_categories=[("PATIENT_ID", "Hospital patient ID, format PAT-XXXXX")],
+        )
+        detector = LlmDetector(config)
+        text = "Patient PAT-12345 was admitted"
+        ollama_response = {"entities": [{"value": "PAT-12345", "category": "PATIENT_ID"}]}
+
+        def mock_urlopen(req, timeout=None):
+            url = req.full_url if hasattr(req, 'full_url') else req.get_full_url()
+            if "/api/tags" in url:
+                return _mock_tags_ok(req, timeout)
+            return _mock_urlopen_factory(ollama_response)(req, timeout)
+
+        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+            results = detector.detect(text, [])
+
+        assert len(results) == 1
+        assert results[0].category == "PATIENT_ID"
+        assert results[0].text == "PAT-12345"
+
+    def test_prompt_includes_custom_category(self):
+        """System prompt includes custom category name in category list."""
+        config = ShieldConfig(
+            llm_detection=True,
+            custom_llm_categories=[("PATIENT_ID", "Hospital patient ID")],
+        )
+        detector = LlmDetector(config)
+        prompt = detector._system_prompt()
+        assert "PATIENT_ID" in prompt
+
+    def test_category_without_description_no_hint(self):
+        """Custom category with empty description appears in list but not in hints."""
+        config = ShieldConfig(
+            llm_detection=True,
+            custom_llm_categories=[("CASE_NUMBER", "")],
+        )
+        detector = LlmDetector(config)
+        prompt = detector._system_prompt()
+        assert "CASE_NUMBER" in prompt
+        assert "Category hints" not in prompt
+
+    def test_excluded_category_rejected_with_warning(self, caplog):
+        """Custom category colliding with EXCLUDED_CATEGORIES is skipped with warning."""
+        config = ShieldConfig(
+            llm_detection=True,
+            custom_llm_categories=[("EMAIL", "Custom email detection")],
+        )
+        with caplog.at_level(logging.WARNING, logger="cloakllm.llm_detector"):
+            detector = LlmDetector(config)
+        assert "EMAIL" not in detector._custom_categories
+        assert any("conflicts" in r.message for r in caplog.records)
+
+    def test_custom_and_builtin_coexist(self):
+        """LLM returns both a built-in and a custom category — both accepted."""
+        config = ShieldConfig(
+            llm_detection=True,
+            custom_llm_categories=[("PATIENT_ID", "Hospital patient ID")],
+        )
+        detector = LlmDetector(config)
+        text = "Patient PAT-12345 lives at 742 Evergreen Terrace"
+        ollama_response = {"entities": [
+            {"value": "PAT-12345", "category": "PATIENT_ID"},
+            {"value": "742 Evergreen Terrace", "category": "ADDRESS"},
+        ]}
+
+        def mock_urlopen(req, timeout=None):
+            url = req.full_url if hasattr(req, 'full_url') else req.get_full_url()
+            if "/api/tags" in url:
+                return _mock_tags_ok(req, timeout)
+            return _mock_urlopen_factory(ollama_response)(req, timeout)
+
+        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+            results = detector.detect(text, [])
+
+        assert len(results) == 2
+        categories = {r.category for r in results}
+        assert "PATIENT_ID" in categories
+        assert "ADDRESS" in categories
+
+    def test_unknown_category_filtered_out(self):
+        """LLM returns a category not in effective set — filtered out."""
+        config = ShieldConfig(
+            llm_detection=True,
+            custom_llm_categories=[("PATIENT_ID", "Hospital patient ID")],
+        )
+        detector = LlmDetector(config)
+        text = "Patient PAT-12345 born 1990-01-15"
+        ollama_response = {"entities": [
+            {"value": "PAT-12345", "category": "PATIENT_ID"},
+            {"value": "1990-01-15", "category": "INVENTED_CATEGORY"},
+        ]}
+
+        def mock_urlopen(req, timeout=None):
+            url = req.full_url if hasattr(req, 'full_url') else req.get_full_url()
+            if "/api/tags" in url:
+                return _mock_tags_ok(req, timeout)
+            return _mock_urlopen_factory(ollama_response)(req, timeout)
+
+        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+            results = detector.detect(text, [])
+
+        assert len(results) == 1
+        assert results[0].category == "PATIENT_ID"

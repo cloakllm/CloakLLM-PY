@@ -51,6 +51,17 @@ class LlmDetector:
         self._confidence = config.llm_confidence
         self._available: bool | None = None  # None = not checked yet
         self._cache: dict[str, _CachedResult] = {}
+        # Custom LLM categories
+        self._custom_categories: dict[str, str] = {}
+        for name, desc in getattr(config, 'custom_llm_categories', []):
+            if name in EXCLUDED_CATEGORIES:
+                logger.warning("Custom LLM category '%s' conflicts with excluded category — skipped", name)
+                continue
+            self._custom_categories[name] = desc
+
+    @property
+    def _effective_categories(self) -> frozenset[str]:
+        return LLM_CATEGORIES | frozenset(self._custom_categories)
 
     def _check_available(self) -> bool:
         """Ping Ollama. Cache result so we only check once."""
@@ -66,9 +77,9 @@ class LlmDetector:
         return self._available
 
     def _system_prompt(self) -> str:
-        cats = ", ".join(sorted(LLM_CATEGORIES))
+        cats = ", ".join(sorted(self._effective_categories))
         excluded = ", ".join(sorted(EXCLUDED_CATEGORIES))
-        return (
+        prompt = (
             "You are a PII detection engine. Given text, extract sensitive entities.\n"
             f"Return ONLY entities in these categories: {cats}\n"
             f"Do NOT detect: {excluded} (already handled by other systems).\n"
@@ -79,6 +90,13 @@ class LlmDetector:
             "- If no entities found, return {\"entities\": []}\n"
             "- Only return high-confidence detections"
         )
+        # Add category hints for custom categories with descriptions
+        hints = [(name, desc) for name, desc in self._custom_categories.items() if desc]
+        if hints:
+            prompt += "\nCategory hints:"
+            for name, desc in sorted(hints):
+                prompt += f"\n- {name}: {desc}"
+        return prompt
 
     def _build_prompt(self, text: str) -> str:
         return f"Extract PII entities from this text:\n\n{text}"
@@ -150,7 +168,7 @@ class LlmDetector:
             # Skip invalid
             if len(value) < 2:
                 continue
-            if category not in LLM_CATEGORIES:
+            if category not in self._effective_categories:
                 continue
 
             # Find all occurrences in text

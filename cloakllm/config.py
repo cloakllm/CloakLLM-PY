@@ -39,6 +39,8 @@ class ShieldConfig:
     detect_iban: bool = True
     # Custom patterns: list of (name, regex_pattern) tuples
     custom_patterns: list[tuple[str, str]] = field(default_factory=list)
+    # Custom LLM categories: list of (name, description) tuples for semantic detection
+    custom_llm_categories: list[tuple[str, str]] = field(default_factory=list)
 
     # --- LLM Detection (Pass 3: local LLM via Ollama) ---
     llm_detection: bool = field(
@@ -85,3 +87,10 @@ class ShieldConfig:
         self.log_dir = Path(self.log_dir)
         if self.mode not in ("tokenize", "redact"):
             raise ValueError(f"Invalid mode '{self.mode}'. Must be 'tokenize' or 'redact'.")
+        import re as _re
+        for name, _desc in self.custom_llm_categories:
+            if not _re.match(r'^[A-Z][A-Z0-9_]*$', name):
+                raise ValueError(
+                    f"Invalid custom LLM category name '{name}'. "
+                    "Must match ^[A-Z][A-Z0-9_]*$"
+                )

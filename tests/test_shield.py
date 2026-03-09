@@ -1027,3 +1027,44 @@ class TestMetrics:
         shield.desanitize("[PHONE_0]", token_map)
         is_valid, errors = shield.verify_audit()
         assert is_valid, f"Chain errors: {errors}"
+
+
+# ──────────────────────────────────────────────
+# Custom LLM Categories Tests
+# ──────────────────────────────────────────────
+
+class TestCustomLlmCategories:
+
+    def test_custom_llm_category_produces_token(self):
+        """End-to-end: custom LLM category produces [PATIENT_ID_0] token."""
+        from unittest.mock import patch, MagicMock
+        import json
+
+        config = ShieldConfig(
+            llm_detection=True,
+            custom_llm_categories=[("PATIENT_ID", "Hospital patient ID")],
+            audit_enabled=False,
+        )
+        shield = Shield(config=config)
+
+        text = "Patient PAT-12345 was admitted"
+        ollama_response = {"entities": [{"value": "PAT-12345", "category": "PATIENT_ID"}]}
+
+        def mock_urlopen(req, timeout=None):
+            url = req.full_url if hasattr(req, 'full_url') else req.get_full_url()
+            if "/api/tags" in url:
+                resp = MagicMock()
+                resp.read.return_value = b'{"models":[]}'
+                return resp
+            body = json.dumps({
+                "message": {"content": json.dumps(ollama_response)}
+            }).encode()
+            resp = MagicMock()
+            resp.read.return_value = body
+            return resp
+
+        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+            sanitized, token_map = shield.sanitize(text)
+
+        assert "[PATIENT_ID_0]" in sanitized
+        assert token_map.entity_count >= 1
