@@ -7,6 +7,7 @@ Can be used standalone or via the LiteLLM middleware integration.
 
 from __future__ import annotations
 
+import hashlib
 import time
 from typing import Any, Optional
 
@@ -230,7 +231,6 @@ class Shield:
         )
 
         # Build per-text hashes for audit metadata
-        import hashlib
         audit_metadata = dict(metadata) if metadata else {}
         audit_metadata["prompt_hashes"] = [
             hashlib.sha256(t.encode()).hexdigest() for t in texts
