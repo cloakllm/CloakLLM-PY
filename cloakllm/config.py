@@ -61,6 +61,16 @@ class ShieldConfig:
     # Use descriptive tokens like [PERSON_0] vs opaque tokens like [TKN_A3F2]
     descriptive_tokens: bool = True
 
+    # --- Entity Hashing ---
+    # Enable per-entity HMAC-SHA256 hashing in entity_details (for cross-document linkage)
+    entity_hashing: bool = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_ENTITY_HASHING", "false").lower() == "true"
+    )
+    # HMAC key — if empty and entity_hashing is True, a random key is auto-generated per session
+    entity_hash_key: str = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_ENTITY_HASH_KEY", "")
+    )
+
     # --- Audit Logging ---
     audit_enabled: bool = True
     log_dir: Path = field(

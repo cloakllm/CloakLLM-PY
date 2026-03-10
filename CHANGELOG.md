@@ -5,6 +5,18 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-03-10
+
+### Added
+
+- Per-entity HMAC hashing: `ShieldConfig(entity_hashing=True, entity_hash_key="...")` generates deterministic HMAC-SHA256 hashes per detected entity
+- Hash included in `entity_details` as `entity_hash` field — enables cross-request entity correlation without storing PII
+- Auto-generates random 32-byte hex key if `entity_hashing=True` but no key provided
+- Hash uses `CATEGORY:normalized_text` as HMAC message — category prefix prevents cross-type collisions, normalization (lowercase + strip) ensures consistency
+- Works with both `tokenize` and `redact` modes, and with `sanitize_batch`
+- Environment variable support: `CLOAKLLM_ENTITY_HASHING`, `CLOAKLLM_ENTITY_HASH_KEY`
+- 10 new tests for entity hashing (total: 136 tests)
+
 ## [0.2.0] - 2026-03-09
 
 ### Added
@@ -122,6 +134,7 @@ versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Invalid custom regex patterns now emit a warning instead of crashing
 - Removed unused `category` variable in pattern compilation loop
 
+[0.2.1]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.2.1
 [0.2.0]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.2.0
 [0.1.9]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.9
 [0.1.8]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.8

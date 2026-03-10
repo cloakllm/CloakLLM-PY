@@ -8,6 +8,7 @@ Can be used standalone or via the LiteLLM middleware integration.
 from __future__ import annotations
 
 import hashlib
+import secrets
 import time
 from typing import Any, Optional
 
@@ -40,6 +41,9 @@ class Shield:
         self.tokenizer = Tokenizer(self.config)
         self.audit = AuditLogger(self.config)
         self._metrics: dict[str, Any] = self._empty_metrics()
+        # Resolve entity hash key once (auto-generate if needed)
+        if self.config.entity_hashing and not self.config.entity_hash_key:
+            self.config.entity_hash_key = secrets.token_hex(32)
 
     @staticmethod
     def _empty_metrics() -> dict[str, Any]:
@@ -95,7 +99,11 @@ class Shield:
 
         # Ensure token_map has the correct mode
         if token_map is None:
-            token_map = TokenMap(mode=self.config.mode)
+            token_map = TokenMap(
+                mode=self.config.mode,
+                entity_hashing=self.config.entity_hashing,
+                entity_hash_key=self.config.entity_hash_key,
+            )
 
         # Tokenize (replace with tokens)
         t0 = time.perf_counter()
@@ -167,7 +175,11 @@ class Shield:
         start_time = time.perf_counter()
 
         if token_map is None:
-            token_map = TokenMap(mode=self.config.mode)
+            token_map = TokenMap(
+                mode=self.config.mode,
+                entity_hashing=self.config.entity_hashing,
+                entity_hash_key=self.config.entity_hash_key,
+            )
 
         sanitized_texts = []
         all_entity_details = []
@@ -197,7 +209,7 @@ class Shield:
                 else:
                     key = det.text.strip()
                     token = token_map.forward.get(key, "")
-                all_entity_details.append({
+                detail = {
                     "category": det.category,
                     "start": det.start,
                     "end": det.end,
@@ -206,7 +218,10 @@ class Shield:
                     "source": det.source,
                     "token": token,
                     "text_index": text_index,
-                })
+                }
+                if token_map.entity_hashing and token_map.entity_hash_key:
+                    detail["entity_hash"] = token_map._compute_entity_hash(det.category, det.text)
+                all_entity_details.append(detail)
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000
 

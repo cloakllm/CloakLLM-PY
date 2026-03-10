@@ -1068,3 +1068,147 @@ class TestCustomLlmCategories:
 
         assert "[PATIENT_ID_0]" in sanitized
         assert token_map.entity_count >= 1
+
+
+# ──────────────────────────────────────────────
+# Entity Hashing Tests
+# ──────────────────────────────────────────────
+
+class TestEntityHashing:
+
+    def test_hash_disabled_by_default(self, shield):
+        """entity_hash should not appear when hashing is disabled."""
+        _, token_map = shield.sanitize("Contact john@acme.com")
+        for detail in token_map.entity_details:
+            assert "entity_hash" not in detail
+
+    def test_hash_enabled_produces_hex(self, tmp_path):
+        """entity_hash should be a 64-char hex string when enabled."""
+        config = ShieldConfig(
+            log_dir=tmp_path / "audit",
+            entity_hashing=True,
+            entity_hash_key="test-key",
+        )
+        shield = Shield(config)
+        _, token_map = shield.sanitize("Contact john@acme.com")
+        details = token_map.entity_details
+        assert len(details) >= 1
+        for detail in details:
+            assert "entity_hash" in detail
+            assert len(detail["entity_hash"]) == 64
+            assert all(c in "0123456789abcdef" for c in detail["entity_hash"])
+
+    def test_hash_deterministic(self, tmp_path):
+        """Same input + key = same hash."""
+        config = ShieldConfig(
+            log_dir=tmp_path / "audit",
+            entity_hashing=True,
+            entity_hash_key="stable-key",
+        )
+        shield1 = Shield(config)
+        _, tm1 = shield1.sanitize("Contact john@acme.com")
+
+        config2 = ShieldConfig(
+            log_dir=tmp_path / "audit",
+            entity_hashing=True,
+            entity_hash_key="stable-key",
+        )
+        shield2 = Shield(config2)
+        _, tm2 = shield2.sanitize("Contact john@acme.com")
+
+        h1 = [d["entity_hash"] for d in tm1.entity_details]
+        h2 = [d["entity_hash"] for d in tm2.entity_details]
+        assert h1 == h2
+
+    def test_hash_category_prefix_prevents_collision(self, tmp_path):
+        """Same text under different categories produces different hashes."""
+        config = ShieldConfig(
+            log_dir=tmp_path / "audit",
+            entity_hashing=True,
+            entity_hash_key="test-key",
+        )
+        from cloakllm.tokenizer import TokenMap
+        tm = TokenMap(entity_hashing=True, entity_hash_key="test-key")
+        hash_person = tm._compute_entity_hash("PERSON", "john")
+        hash_org = tm._compute_entity_hash("ORG", "john")
+        assert hash_person != hash_org
+
+    def test_hash_normalization(self, tmp_path):
+        """Hashing normalizes case and whitespace."""
+        from cloakllm.tokenizer import TokenMap
+        tm = TokenMap(entity_hashing=True, entity_hash_key="test-key")
+        h1 = tm._compute_entity_hash("EMAIL", "John@Acme.com")
+        h2 = tm._compute_entity_hash("EMAIL", "  john@acme.com  ")
+        assert h1 == h2
+
+    def test_hash_auto_generates_key(self, tmp_path):
+        """When entity_hashing=True but no key, a key is auto-generated."""
+        config = ShieldConfig(
+            log_dir=tmp_path / "audit",
+            entity_hashing=True,
+        )
+        shield = Shield(config)
+        assert len(shield.config.entity_hash_key) == 64  # 32 bytes hex
+        _, token_map = shield.sanitize("Contact john@acme.com")
+        details = token_map.entity_details
+        assert any("entity_hash" in d for d in details)
+
+    def test_hash_works_in_redact_mode(self, tmp_path):
+        """entity_hash should appear even in redact mode."""
+        config = ShieldConfig(
+            log_dir=tmp_path / "audit",
+            mode="redact",
+            entity_hashing=True,
+            entity_hash_key="test-key",
+        )
+        shield = Shield(config)
+        _, token_map = shield.sanitize("Contact john@acme.com")
+        details = token_map.entity_details
+        assert len(details) >= 1
+        for d in details:
+            assert "entity_hash" in d
+            assert d["token"].endswith("_REDACTED]")
+
+    def test_hash_audit_chain_valid(self, tmp_path):
+        """Audit chain should remain valid with entity hashing enabled."""
+        config = ShieldConfig(
+            log_dir=tmp_path / "audit",
+            entity_hashing=True,
+            entity_hash_key="test-key",
+        )
+        shield = Shield(config)
+        shield.sanitize("Contact john@acme.com")
+        shield.sanitize("Call +1-555-0142")
+        valid, errors = shield.verify_audit()
+        assert valid, f"Audit chain errors: {errors}"
+
+    def test_hash_batch_includes_hash(self, tmp_path):
+        """sanitize_batch should include entity_hash with text_index."""
+        config = ShieldConfig(
+            log_dir=tmp_path / "audit",
+            entity_hashing=True,
+            entity_hash_key="test-key",
+        )
+        shield = Shield(config)
+        texts = ["Email john@acme.com", "Call +1-555-0142"]
+        _, token_map = shield.sanitize_batch(texts)
+        # entity_details from token_map should have hashes
+        details = token_map.entity_details
+        assert len(details) >= 2
+        for d in details:
+            assert "entity_hash" in d
+
+    def test_hash_cross_sdk_known_value(self, tmp_path):
+        """Known-value test for cross-SDK parity."""
+        import hmac
+        import hashlib
+        key = "test-key"
+        category = "EMAIL"
+        text = "john@acme.com"
+        message = f"{category}:{text.strip().lower()}"
+        expected = hmac.new(key.encode(), message.encode(), hashlib.sha256).hexdigest()
+
+        from cloakllm.tokenizer import TokenMap
+        tm = TokenMap(entity_hashing=True, entity_hash_key=key)
+        actual = tm._compute_entity_hash(category, text)
+        assert actual == expected

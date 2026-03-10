@@ -8,6 +8,8 @@ Tokens are descriptive by default: [PERSON_0], [EMAIL_1], etc.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
 from dataclasses import dataclass, field
 from typing import Optional
@@ -39,6 +41,19 @@ class TokenMap:
     detections: list[Detection] = field(default_factory=list)
     # Mode: "tokenize" or "redact"
     mode: str = "tokenize"
+    # Entity hashing
+    entity_hashing: bool = False
+    entity_hash_key: str = ""
+
+    def _compute_entity_hash(self, category: str, original_text: str) -> str:
+        """Compute HMAC-SHA256 hash for an entity: HMAC(key, "CATEGORY:normalized")."""
+        normalized = original_text.strip().lower()
+        message = f"{category}:{normalized}"
+        return hmac.new(
+            self.entity_hash_key.encode("utf-8"),
+            message.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
 
     def get_or_create(self, original: str, category: str) -> str:
         """Get existing token for value, or create a new one."""
@@ -82,7 +97,7 @@ class TokenMap:
             else:
                 key = det.text.strip()
                 token = self.forward.get(key, "")
-            details.append({
+            detail = {
                 "category": det.category,
                 "start": det.start,
                 "end": det.end,
@@ -90,7 +105,10 @@ class TokenMap:
                 "confidence": det.confidence,
                 "source": det.source,
                 "token": token,
-            })
+            }
+            if self.entity_hashing and self.entity_hash_key:
+                detail["entity_hash"] = self._compute_entity_hash(det.category, det.text)
+            details.append(detail)
         details.sort(key=lambda d: d["start"])
         return details
 
