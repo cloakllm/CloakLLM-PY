@@ -5,6 +5,17 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-03-10
+
+### Fixed
+
+- **[SECURITY]** Multi-choice desanitization in OpenAI middleware — only first choice was desanitized when `n>1`, leaking PII tokens in remaining choices
+- Thread-safety of `Shield._metrics` — added `threading.Lock` to prevent corrupted counters under concurrent `sanitize()` calls
+- `token_map.detections` accumulating across multi-turn calls — now cleared per `sanitize()`/`sanitize_batch()` call (forward/reverse maps preserved)
+- Metrics double-counting categories in multi-turn sessions (consequence of detections fix)
+- `LlmDetector._cache` unbounded memory growth — replaced with bounded LRU cache (maxsize=1024)
+- Audit chain recovery failing when newest log file is empty — now iterates backwards to find last valid entry
+
 ## [0.2.1] - 2026-03-10
 
 ### Added
@@ -134,6 +145,7 @@ versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Invalid custom regex patterns now emit a warning instead of crashing
 - Removed unused `category` variable in pattern compilation loop
 
+[0.2.2]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.2.2
 [0.2.1]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.2.1
 [0.2.0]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.2.0
 [0.1.9]: https://github.com/cloakllm/CloakLLM-PY/releases/tag/v0.1.9

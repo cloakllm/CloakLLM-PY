@@ -72,13 +72,12 @@ class AuditLogger:
 
         self._log_dir.mkdir(parents=True, exist_ok=True)
 
-        # Recover chain state from most recent log file
+        # Recover chain state from most recent non-empty log file
         log_files = sorted(self._log_dir.glob("audit_*.jsonl"))
-        if log_files:
-            last_file = log_files[-1]
+        for log_file in reversed(log_files):
             try:
                 last_line = ""
-                with open(last_file, "r") as f:
+                with open(log_file, "r") as f:
                     for line in f:
                         if line.strip():
                             last_line = line.strip()
@@ -86,8 +85,9 @@ class AuditLogger:
                     entry = json.loads(last_line)
                     self._seq = entry["seq"] + 1
                     self._prev_hash = entry["entry_hash"]
+                    break
             except (json.JSONDecodeError, KeyError):
-                pass  # Start fresh if log is corrupted
+                continue  # Try older file if this one is corrupted
 
         self._initialized = True
 

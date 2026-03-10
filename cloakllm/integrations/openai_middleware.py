@@ -195,13 +195,18 @@ def enable(client: Any, config: Optional[ShieldConfig] = None):
                     return _async_stream_wrapper(response, model, stream_key)
 
                 if call_key and not _should_skip(model) and hasattr(response, "choices"):
-                    for choice in response.choices:
-                        if hasattr(choice, "message") and hasattr(choice.message, "content"):
-                            if choice.message.content:
-                                choice.message.content = _desanitize_response(
-                                    choice.message.content, model, call_key
-                                )
-                                call_key = ""  # consumed
+                    with _maps_lock:
+                        token_map = _active_maps.pop(call_key, None)
+                    call_key = ""  # consumed — cleanup handled above
+                    if token_map and token_map.entity_count > 0:
+                        for choice in response.choices:
+                            if hasattr(choice, "message") and hasattr(choice.message, "content"):
+                                if choice.message.content:
+                                    choice.message.content = _shield.desanitize(
+                                        text=choice.message.content,
+                                        token_map=token_map,
+                                        model=model,
+                                    )
 
                 return response
             finally:
@@ -234,13 +239,18 @@ def enable(client: Any, config: Optional[ShieldConfig] = None):
                     return _sync_stream_wrapper(response, model, stream_key)
 
                 if call_key and not _should_skip(model) and hasattr(response, "choices"):
-                    for choice in response.choices:
-                        if hasattr(choice, "message") and hasattr(choice.message, "content"):
-                            if choice.message.content:
-                                choice.message.content = _desanitize_response(
-                                    choice.message.content, model, call_key
-                                )
-                                call_key = ""  # consumed
+                    with _maps_lock:
+                        token_map = _active_maps.pop(call_key, None)
+                    call_key = ""  # consumed — cleanup handled above
+                    if token_map and token_map.entity_count > 0:
+                        for choice in response.choices:
+                            if hasattr(choice, "message") and hasattr(choice.message, "content"):
+                                if choice.message.content:
+                                    choice.message.content = _shield.desanitize(
+                                        text=choice.message.content,
+                                        token_map=token_map,
+                                        model=model,
+                                    )
 
                 return response
             finally:

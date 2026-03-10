@@ -15,6 +15,7 @@ import logging
 import re
 import urllib.error
 import urllib.request
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -41,6 +42,28 @@ class _CachedResult:
     entities: list[dict]
 
 
+class _BoundedCache:
+    """LRU cache with a maximum size."""
+
+    def __init__(self, maxsize: int = 1024):
+        self._cache: OrderedDict[str, _CachedResult] = OrderedDict()
+        self._maxsize = maxsize
+
+    def get(self, key: str) -> _CachedResult | None:
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+        return None
+
+    def set(self, key: str, value: _CachedResult) -> None:
+        self._cache[key] = value
+        if len(self._cache) > self._maxsize:
+            self._cache.popitem(last=False)
+
+    def clear(self) -> None:
+        self._cache.clear()
+
+
 class LlmDetector:
     """Detects semantic PII via a local Ollama LLM."""
 
@@ -50,7 +73,7 @@ class LlmDetector:
         self._timeout = config.llm_timeout
         self._confidence = config.llm_confidence
         self._available: bool | None = None  # None = not checked yet
-        self._cache: dict[str, _CachedResult] = {}
+        self._cache = _BoundedCache(maxsize=getattr(config, 'llm_cache_maxsize', 1024))
         # Custom LLM categories
         self._custom_categories: dict[str, str] = {}
         for name, desc in getattr(config, 'custom_llm_categories', []):
@@ -151,11 +174,12 @@ class LlmDetector:
             return []
 
         # Check cache
-        if text in self._cache:
-            entities = self._cache[text].entities
+        cached = self._cache.get(text)
+        if cached is not None:
+            entities = cached.entities
         else:
             entities = self._query_ollama(text)
-            self._cache[text] = _CachedResult(entities=entities)
+            self._cache.set(text, _CachedResult(entities=entities))
 
         # Sort by value length desc (longer matches first)
         entities.sort(key=lambda e: len(e.get("value", "")), reverse=True)

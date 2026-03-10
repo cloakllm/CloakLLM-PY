@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import threading
 import time
 from typing import Any, Optional
 
@@ -41,6 +42,7 @@ class Shield:
         self.tokenizer = Tokenizer(self.config)
         self.audit = AuditLogger(self.config)
         self._metrics: dict[str, Any] = self._empty_metrics()
+        self._metrics_lock = threading.Lock()
         # Resolve entity hash key once (auto-generate if needed)
         if self.config.entity_hashing and not self.config.entity_hash_key:
             self.config.entity_hash_key = secrets.token_hex(32)
@@ -60,14 +62,15 @@ class Shield:
                             detection_timing: dict[str, float],
                             tokenization_ms: float, entity_count: int,
                             categories: dict[str, int]) -> None:
-        self._metrics["calls"][call_type] += 1
-        self._metrics["total_ms"] += total_ms
-        for key in ("regex_ms", "ner_ms", "llm_ms"):
-            self._metrics["detection"][key] += detection_timing.get(key, 0.0)
-        self._metrics["tokenization_ms"] += tokenization_ms
-        self._metrics["entities_detected"] += entity_count
-        for cat, count in categories.items():
-            self._metrics["categories"][cat] = self._metrics["categories"].get(cat, 0) + count
+        with self._metrics_lock:
+            self._metrics["calls"][call_type] += 1
+            self._metrics["total_ms"] += total_ms
+            for key in ("regex_ms", "ner_ms", "llm_ms"):
+                self._metrics["detection"][key] += detection_timing.get(key, 0.0)
+            self._metrics["tokenization_ms"] += tokenization_ms
+            self._metrics["entities_detected"] += entity_count
+            for cat, count in categories.items():
+                self._metrics["categories"][cat] = self._metrics["categories"].get(cat, 0) + count
 
     def sanitize(
         self,
@@ -104,6 +107,9 @@ class Shield:
                 entity_hashing=self.config.entity_hashing,
                 entity_hash_key=self.config.entity_hash_key,
             )
+
+        # Clear per-call metadata (preserves forward/reverse maps for multi-turn)
+        token_map.detections.clear()
 
         # Tokenize (replace with tokens)
         t0 = time.perf_counter()
@@ -180,6 +186,9 @@ class Shield:
                 entity_hashing=self.config.entity_hashing,
                 entity_hash_key=self.config.entity_hash_key,
             )
+
+        # Clear per-call metadata (preserves forward/reverse maps for multi-turn)
+        token_map.detections.clear()
 
         sanitized_texts = []
         all_entity_details = []
@@ -412,20 +421,22 @@ class Shield:
 
     def metrics(self) -> dict:
         """Return accumulated performance metrics for this Shield instance."""
-        total_calls = sum(self._metrics["calls"].values())
-        return {
-            "calls": dict(self._metrics["calls"]),
-            "total_ms": round(self._metrics["total_ms"], 2),
-            "avg_ms": round(self._metrics["total_ms"] / total_calls, 2) if total_calls else 0.0,
-            "detection": {k: round(v, 2) for k, v in self._metrics["detection"].items()},
-            "tokenization_ms": round(self._metrics["tokenization_ms"], 2),
-            "entities_detected": self._metrics["entities_detected"],
-            "categories": dict(self._metrics["categories"]),
-        }
+        with self._metrics_lock:
+            total_calls = sum(self._metrics["calls"].values())
+            return {
+                "calls": dict(self._metrics["calls"]),
+                "total_ms": round(self._metrics["total_ms"], 2),
+                "avg_ms": round(self._metrics["total_ms"] / total_calls, 2) if total_calls else 0.0,
+                "detection": {k: round(v, 2) for k, v in self._metrics["detection"].items()},
+                "tokenization_ms": round(self._metrics["tokenization_ms"], 2),
+                "entities_detected": self._metrics["entities_detected"],
+                "categories": dict(self._metrics["categories"]),
+            }
 
     def reset_metrics(self) -> None:
         """Reset accumulated performance metrics."""
-        self._metrics = self._empty_metrics()
+        with self._metrics_lock:
+            self._metrics = self._empty_metrics()
 
     def verify_audit(self) -> tuple[bool, list[str]]:
         """Verify the integrity of all audit logs."""
