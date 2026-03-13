@@ -108,22 +108,10 @@ def _sanitize_messages(messages: list[dict], model: str) -> tuple[list[dict], st
     return sanitized_messages, call_key
 
 
-def _desanitize_response(response_text: str, model: str, call_key: str) -> str:
-    """Desanitize a response using the stored token map."""
-    if not _shield:
-        return response_text
-
+def _pop_token_map(call_key: str) -> Optional[TokenMap]:
+    """Retrieve and remove the stored token map for a call."""
     with _maps_lock:
-        token_map = _active_maps.pop(call_key, None)
-
-    if not token_map or token_map.entity_count == 0:
-        return response_text
-
-    return _shield.desanitize(
-        text=response_text,
-        token_map=token_map,
-        model=model,
-    )
+        return _active_maps.pop(call_key, None)
 
 
 def _should_skip(model: str) -> bool:
@@ -179,14 +167,17 @@ def enable(config: Optional[ShieldConfig] = None):
             # Call original
             response = _original_completion(*args, **kwargs)
 
-            # Desanitize response
+            # Desanitize all choices with the SAME token map (pop once)
             if not _should_skip(model) and call_key and hasattr(response, "choices"):
-                for choice in response.choices:
-                    if hasattr(choice, "message") and hasattr(choice.message, "content"):
-                        if choice.message.content:
-                            choice.message.content = _desanitize_response(
-                                choice.message.content, model, call_key
-                            )
+                token_map = _pop_token_map(call_key)
+                call_key = ""  # consumed — skip finally cleanup
+                if token_map and token_map.entity_count > 0:
+                    for choice in response.choices:
+                        if hasattr(choice, "message") and hasattr(choice.message, "content"):
+                            if choice.message.content:
+                                choice.message.content = _shield.desanitize(
+                                    choice.message.content, token_map, model=model
+                                )
 
             return response
         finally:
@@ -207,13 +198,17 @@ def enable(config: Optional[ShieldConfig] = None):
         try:
             response = await _original_acompletion(*args, **kwargs)
 
+            # Desanitize all choices with the SAME token map (pop once)
             if not _should_skip(model) and call_key and hasattr(response, "choices"):
-                for choice in response.choices:
-                    if hasattr(choice, "message") and hasattr(choice.message, "content"):
-                        if choice.message.content:
-                            choice.message.content = _desanitize_response(
-                                choice.message.content, model, call_key
-                            )
+                token_map = _pop_token_map(call_key)
+                call_key = ""  # consumed — skip finally cleanup
+                if token_map and token_map.entity_count > 0:
+                    for choice in response.choices:
+                        if hasattr(choice, "message") and hasattr(choice.message, "content"):
+                            if choice.message.content:
+                                choice.message.content = _shield.desanitize(
+                                    choice.message.content, token_map, model=model
+                                )
 
             return response
         finally:

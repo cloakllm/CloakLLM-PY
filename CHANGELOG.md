@@ -5,6 +5,12 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-03-13
+
+### Fixed
+
+- **[SECURITY]** LiteLLM multi-choice desanitization — `_desanitize_response()` popped the token map on first choice, causing remaining choices (`n>1`) to skip desanitization and leak PII tokens. Now pops once and iterates all choices with the same map.
+
 ## [0.2.2] - 2026-03-10
 
 ### Fixed
