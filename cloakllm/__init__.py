@@ -19,10 +19,11 @@ Standalone usage:
     # sanitized: "Send email to [EMAIL_0] about [ORG_0]"
 """
 
-__version__ = "0.2.5"
+__version__ = "0.3.0"
 
 from cloakllm.shield import Shield
 from cloakllm.config import ShieldConfig
+from cloakllm.stream import StreamDesanitizer
 from cloakllm.integrations.litellm_middleware import enable, disable, get_shield, is_enabled
 from cloakllm.integrations.openai_middleware import (
     enable as enable_openai,
@@ -32,6 +33,7 @@ from cloakllm.integrations.openai_middleware import (
 __all__ = [
     "Shield",
     "ShieldConfig",
+    "StreamDesanitizer",
     "enable",
     "disable",
     "get_shield",

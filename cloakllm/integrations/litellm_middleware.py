@@ -30,6 +30,7 @@ from typing import Any, Optional
 
 from cloakllm.config import ShieldConfig
 from cloakllm.shield import Shield
+from cloakllm.stream import StreamDesanitizer
 from cloakllm.tokenizer import TokenMap
 
 
@@ -157,6 +158,7 @@ def enable(config: Optional[ShieldConfig] = None):
     def shielded_completion(*args, **kwargs):
         model = kwargs.get("model") or (args[0] if args else "unknown")
         messages = kwargs.get("messages") or (args[1] if len(args) > 1 else [])
+        stream = kwargs.get("stream", False)
         call_key = ""
 
         if not _should_skip(model):
@@ -166,6 +168,12 @@ def enable(config: Optional[ShieldConfig] = None):
         try:
             # Call original
             response = _original_completion(*args, **kwargs)
+
+            # Handle streaming responses
+            if stream and call_key and not _should_skip(model):
+                stream_key = call_key
+                call_key = ""  # stream wrapper owns cleanup
+                return _sync_litellm_stream_wrapper(response, model, stream_key)
 
             # Desanitize all choices with the SAME token map (pop once)
             if not _should_skip(model) and call_key and hasattr(response, "choices"):
@@ -189,6 +197,7 @@ def enable(config: Optional[ShieldConfig] = None):
     async def shielded_acompletion(*args, **kwargs):
         model = kwargs.get("model") or (args[0] if args else "unknown")
         messages = kwargs.get("messages") or (args[1] if len(args) > 1 else [])
+        stream = kwargs.get("stream", False)
         call_key = ""
 
         if not _should_skip(model):
@@ -197,6 +206,12 @@ def enable(config: Optional[ShieldConfig] = None):
 
         try:
             response = await _original_acompletion(*args, **kwargs)
+
+            # Handle streaming responses
+            if stream and call_key and not _should_skip(model):
+                stream_key = call_key
+                call_key = ""  # stream wrapper owns cleanup
+                return _async_litellm_stream_wrapper(response, model, stream_key)
 
             # Desanitize all choices with the SAME token map (pop once)
             if not _should_skip(model) and call_key and hasattr(response, "choices"):
@@ -257,6 +272,93 @@ def disable():
         _active_maps.clear()
 
     print("🛡️  CloakLLM disabled")
+
+
+def _sync_litellm_stream_wrapper(stream, model: str, call_key: str):
+    """Wrap a sync LiteLLM streaming response with incremental desanitization."""
+    try:
+        token_map = _pop_token_map(call_key)
+
+        if not token_map or token_map.entity_count == 0:
+            yield from stream
+            return
+
+        desan = StreamDesanitizer(token_map)
+        last_chunk = None
+
+        for chunk in stream:
+            last_chunk = chunk
+            if hasattr(chunk, "choices") and chunk.choices:
+                delta = chunk.choices[0].delta
+                if hasattr(delta, "content") and delta.content:
+                    output = desan.feed(delta.content)
+                    if output:
+                        chunk.choices[0].delta.content = output
+                        yield chunk
+                    continue
+
+                finish_reason = chunk.choices[0].finish_reason
+                if finish_reason:
+                    flushed = desan.flush()
+                    if flushed:
+                        chunk.choices[0].delta.content = flushed
+                    yield chunk
+                    return
+
+            yield chunk
+
+        # Stream ended without finish_reason
+        flushed = desan.flush()
+        if flushed and last_chunk:
+            last_chunk.choices[0].delta.content = flushed
+            yield last_chunk
+    finally:
+        with _maps_lock:
+            _active_maps.pop(call_key, None)
+
+
+async def _async_litellm_stream_wrapper(stream, model: str, call_key: str):
+    """Wrap an async LiteLLM streaming response with incremental desanitization."""
+    try:
+        token_map = _pop_token_map(call_key)
+
+        if not token_map or token_map.entity_count == 0:
+            async for chunk in stream:
+                yield chunk
+            return
+
+        desan = StreamDesanitizer(token_map)
+        last_chunk = None
+
+        async for chunk in stream:
+            last_chunk = chunk
+            if hasattr(chunk, "choices") and chunk.choices:
+                delta = chunk.choices[0].delta
+                if hasattr(delta, "content") and delta.content:
+                    output = desan.feed(delta.content)
+                    if output:
+                        chunk.choices[0].delta.content = output
+                        yield chunk
+                    continue
+
+                finish_reason = chunk.choices[0].finish_reason
+                if finish_reason:
+                    flushed = desan.flush()
+                    if flushed:
+                        chunk.choices[0].delta.content = flushed
+                    yield chunk
+                    return
+
+            yield chunk
+
+        # Stream ended without finish_reason
+        flushed = desan.flush()
+        if flushed and last_chunk:
+            last_chunk.choices[0].delta.content = flushed
+            yield last_chunk
+    finally:
+        with _maps_lock:
+            _active_maps.pop(call_key, None)
 
 
 def get_shield() -> Optional[Shield]:

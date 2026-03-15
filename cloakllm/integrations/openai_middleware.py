@@ -34,6 +34,7 @@ from typing import Any, Optional
 
 from cloakllm.config import ShieldConfig
 from cloakllm.shield import Shield
+from cloakllm.stream import StreamDesanitizer
 from cloakllm.tokenizer import TokenMap
 
 
@@ -308,27 +309,43 @@ def _is_async_client(client: Any) -> bool:
 
 
 def _sync_stream_wrapper(stream, model: str, call_key: str):
-    """Wrap a sync streaming response: buffer all chunks, desanitize, yield final."""
+    """Wrap a sync streaming response: incrementally desanitize tokens as they arrive."""
     try:
-        buffer = ""
+        with _maps_lock:
+            token_map = _active_maps.pop(call_key, None)
+
+        if not token_map or token_map.entity_count == 0:
+            yield from stream
+            return
+
+        desan = StreamDesanitizer(token_map)
         last_chunk = None
+
         for chunk in stream:
             last_chunk = chunk
             if hasattr(chunk, "choices") and chunk.choices:
                 delta = chunk.choices[0].delta
                 if hasattr(delta, "content") and delta.content:
-                    buffer += delta.content
+                    output = desan.feed(delta.content)
+                    if output:
+                        chunk.choices[0].delta.content = output
+                        yield chunk
+                    continue
+
                 finish_reason = chunk.choices[0].finish_reason
                 if finish_reason:
-                    desanitized = _desanitize_response(buffer, model, call_key)
-                    chunk.choices[0].delta.content = desanitized
+                    flushed = desan.flush()
+                    if flushed:
+                        chunk.choices[0].delta.content = flushed
                     yield chunk
                     return
 
-        # Stream ended without finish_reason — emit whatever we have
-        if buffer and last_chunk:
-            desanitized = _desanitize_response(buffer, model, call_key)
-            last_chunk.choices[0].delta.content = desanitized
+            yield chunk
+
+        # Stream ended without finish_reason
+        flushed = desan.flush()
+        if flushed and last_chunk:
+            last_chunk.choices[0].delta.content = flushed
             yield last_chunk
     finally:
         with _maps_lock:
@@ -336,27 +353,44 @@ def _sync_stream_wrapper(stream, model: str, call_key: str):
 
 
 async def _async_stream_wrapper(stream, model: str, call_key: str):
-    """Wrap an async streaming response: buffer all chunks, desanitize, yield final."""
+    """Wrap an async streaming response: incrementally desanitize tokens as they arrive."""
     try:
-        buffer = ""
+        with _maps_lock:
+            token_map = _active_maps.pop(call_key, None)
+
+        if not token_map or token_map.entity_count == 0:
+            async for chunk in stream:
+                yield chunk
+            return
+
+        desan = StreamDesanitizer(token_map)
         last_chunk = None
+
         async for chunk in stream:
             last_chunk = chunk
             if hasattr(chunk, "choices") and chunk.choices:
                 delta = chunk.choices[0].delta
                 if hasattr(delta, "content") and delta.content:
-                    buffer += delta.content
+                    output = desan.feed(delta.content)
+                    if output:
+                        chunk.choices[0].delta.content = output
+                        yield chunk
+                    continue
+
                 finish_reason = chunk.choices[0].finish_reason
                 if finish_reason:
-                    desanitized = _desanitize_response(buffer, model, call_key)
-                    chunk.choices[0].delta.content = desanitized
+                    flushed = desan.flush()
+                    if flushed:
+                        chunk.choices[0].delta.content = flushed
                     yield chunk
                     return
 
+            yield chunk
+
         # Stream ended without finish_reason
-        if buffer and last_chunk:
-            desanitized = _desanitize_response(buffer, model, call_key)
-            last_chunk.choices[0].delta.content = desanitized
+        flushed = desan.flush()
+        if flushed and last_chunk:
+            last_chunk.choices[0].delta.content = flushed
             yield last_chunk
     finally:
         with _maps_lock:

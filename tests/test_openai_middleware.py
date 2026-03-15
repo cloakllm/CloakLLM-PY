@@ -316,11 +316,14 @@ class TestSyncStreaming:
         )
 
         output_chunks = list(result)
-        # Should get exactly one chunk (the final desanitized one)
-        assert len(output_chunks) == 1
-        content = output_chunks[0].choices[0].delta.content
-        assert "john@example.com" in content
-        assert "[EMAIL_0]" not in content
+        # Incremental streaming: multiple chunks emitted as text arrives
+        assert len(output_chunks) >= 1
+        full_content = "".join(
+            c.choices[0].delta.content for c in output_chunks
+            if hasattr(c.choices[0].delta, "content") and c.choices[0].delta.content
+        )
+        assert "john@example.com" in full_content
+        assert "[EMAIL_0]" not in full_content
 
 
 # ──────────────────────────────────────────────
@@ -387,10 +390,14 @@ class TestAsyncStreaming:
             return output
 
         output_chunks = asyncio.get_event_loop().run_until_complete(run())
-        assert len(output_chunks) == 1
-        content = output_chunks[0].choices[0].delta.content
-        assert "john@example.com" in content
-        assert "[EMAIL_0]" not in content
+        # Incremental streaming: multiple chunks emitted as text arrives
+        assert len(output_chunks) >= 1
+        full_content = "".join(
+            c.choices[0].delta.content for c in output_chunks
+            if hasattr(c.choices[0].delta, "content") and c.choices[0].delta.content
+        )
+        assert "john@example.com" in full_content
+        assert "[EMAIL_0]" not in full_content
 
 
 # ──────────────────────────────────────────────

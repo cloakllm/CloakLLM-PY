@@ -5,6 +5,19 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-15
+
+### Added
+
+- `StreamDesanitizer` — incremental streaming desanitization state machine (`cloakllm.stream`)
+- LiteLLM middleware streaming support (`stream=True` now desanitizes incrementally)
+- Integration tests for OpenAI and LiteLLM middleware (sync, async, streaming, n>1 choices)
+
+### Changed
+
+- OpenAI middleware streaming: replaced full-buffer approach with incremental `StreamDesanitizer`
+- All middleware paths now emit desanitized text as chunks arrive instead of buffering entire response
+
 ## [0.2.5] - 2026-03-15
 
 ### Changed
