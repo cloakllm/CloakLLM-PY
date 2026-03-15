@@ -1,0 +1,1641 @@
+{
+  "version": "1.0",
+  "samples": [
+    {
+      "id": "email_simple_01",
+      "text": "Please contact john.doe@example.com for more information.",
+      "entities": [
+        {
+          "start": 15,
+          "end": 35,
+          "category": "EMAIL",
+          "value": "john.doe@example.com"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "email_simple_02",
+      "text": "Send a message to alice@company.co.uk regarding the invoice.",
+      "entities": [
+        {
+          "start": 18,
+          "end": 37,
+          "category": "EMAIL",
+          "value": "alice@company.co.uk"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "email_plus_03",
+      "text": "Use user+tag@domain.org for newsletters.",
+      "entities": [
+        {
+          "start": 4,
+          "end": 23,
+          "category": "EMAIL",
+          "value": "user+tag@domain.org"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "email_multi_04",
+      "text": "CC bob@startup.io and carol@mega.com on this thread.",
+      "entities": [
+        {
+          "start": 3,
+          "end": 17,
+          "category": "EMAIL",
+          "value": "bob@startup.io"
+        },
+        {
+          "start": 22,
+          "end": 36,
+          "category": "EMAIL",
+          "value": "carol@mega.com"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "email_dots_05",
+      "text": "Reach out to first.middle.last@subdomain.example.com please.",
+      "entities": [
+        {
+          "start": 13,
+          "end": 52,
+          "category": "EMAIL",
+          "value": "first.middle.last@subdomain.example.com"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "email_percent_06",
+      "text": "Email test%user@host.net for access.",
+      "entities": [
+        {
+          "start": 6,
+          "end": 24,
+          "category": "EMAIL",
+          "value": "test%user@host.net"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "email_numbers_07",
+      "text": "Contact user123@mail456.org for details.",
+      "entities": [
+        {
+          "start": 8,
+          "end": 27,
+          "category": "EMAIL",
+          "value": "user123@mail456.org"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "email_hyphen_08",
+      "text": "Write to my-name@my-domain.co for help.",
+      "entities": [
+        {
+          "start": 9,
+          "end": 29,
+          "category": "EMAIL",
+          "value": "my-name@my-domain.co"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "email_short_09",
+      "text": "The admin is a@b.cd on this system.",
+      "entities": [
+        {
+          "start": 13,
+          "end": 19,
+          "category": "EMAIL",
+          "value": "a@b.cd"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "email_long_tld_10",
+      "text": "Notify support@company.museum about it.",
+      "entities": [
+        {
+          "start": 7,
+          "end": 29,
+          "category": "EMAIL",
+          "value": "support@company.museum"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "email_underscore_11",
+      "text": "Forward to john_doe@work.com the report.",
+      "entities": [
+        {
+          "start": 11,
+          "end": 28,
+          "category": "EMAIL",
+          "value": "john_doe@work.com"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "email_uppercase_12",
+      "text": "The address is Admin@BigCorp.COM for inquiries.",
+      "entities": [
+        {
+          "start": 15,
+          "end": 32,
+          "category": "EMAIL",
+          "value": "Admin@BigCorp.COM"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "ssn_dashes_01",
+      "text": "My SSN is 123-45-6789.",
+      "entities": [
+        {
+          "start": 10,
+          "end": 21,
+          "category": "SSN",
+          "value": "123-45-6789"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "ssn_no_dashes_02",
+      "text": "SSN: 123456789 on file.",
+      "entities": [
+        {
+          "start": 5,
+          "end": 14,
+          "category": "SSN",
+          "value": "123456789"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "ssn_spaces_03",
+      "text": "Social security number is 456 78 9012.",
+      "entities": [
+        {
+          "start": 26,
+          "end": 37,
+          "category": "SSN",
+          "value": "456 78 9012"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "ssn_context_04",
+      "text": "Record SSN 234-56-7890 for the employee.",
+      "entities": [
+        {
+          "start": 11,
+          "end": 22,
+          "category": "SSN",
+          "value": "234-56-7890"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "ssn_multi_05",
+      "text": "Applicant A: 345-67-8901 and Applicant B: 456-78-9012.",
+      "entities": [
+        {
+          "start": 13,
+          "end": 24,
+          "category": "SSN",
+          "value": "345-67-8901"
+        },
+        {
+          "start": 42,
+          "end": 53,
+          "category": "SSN",
+          "value": "456-78-9012"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "ssn_boundary_06",
+      "text": "The number 001-01-0001 is the lowest valid SSN.",
+      "entities": [
+        {
+          "start": 11,
+          "end": 22,
+          "category": "SSN",
+          "value": "001-01-0001"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "ssn_high_07",
+      "text": "SSN on record: 899-99-9999.",
+      "entities": [
+        {
+          "start": 15,
+          "end": 26,
+          "category": "SSN",
+          "value": "899-99-9999"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "ssn_embedded_08",
+      "text": "File reference #567-89-0123 needs review.",
+      "entities": [
+        {
+          "start": 16,
+          "end": 27,
+          "category": "SSN",
+          "value": "567-89-0123"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "cc_visa_01",
+      "text": "Charge to 4111111111111111 please.",
+      "entities": [
+        {
+          "start": 10,
+          "end": 26,
+          "category": "CREDIT_CARD",
+          "value": "4111111111111111"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "cc_visa_short_02",
+      "text": "Card number 4012888888881881 on file.",
+      "entities": [
+        {
+          "start": 12,
+          "end": 28,
+          "category": "CREDIT_CARD",
+          "value": "4012888888881881"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "cc_mastercard_03",
+      "text": "Payment via 5105105105105100.",
+      "entities": [
+        {
+          "start": 12,
+          "end": 28,
+          "category": "CREDIT_CARD",
+          "value": "5105105105105100"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "cc_amex_04",
+      "text": "Use Amex 371449635398431 for the purchase.",
+      "entities": [
+        {
+          "start": 9,
+          "end": 24,
+          "category": "CREDIT_CARD",
+          "value": "371449635398431"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "cc_discover_05",
+      "text": "Discover card 6011111111111117 accepted.",
+      "entities": [
+        {
+          "start": 14,
+          "end": 30,
+          "category": "CREDIT_CARD",
+          "value": "6011111111111117"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "cc_mc2_06",
+      "text": "Billing card: 5500000000000004.",
+      "entities": [
+        {
+          "start": 14,
+          "end": 30,
+          "category": "CREDIT_CARD",
+          "value": "5500000000000004"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "cc_visa13_07",
+      "text": "Old Visa: 4222222222222.",
+      "entities": [
+        {
+          "start": 10,
+          "end": 23,
+          "category": "CREDIT_CARD",
+          "value": "4222222222222"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "cc_discover2_08",
+      "text": "Refund to 6500000000000002.",
+      "entities": [
+        {
+          "start": 10,
+          "end": 26,
+          "category": "CREDIT_CARD",
+          "value": "6500000000000002"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "phone_us_01",
+      "text": "Call me at 555-867-5309 anytime.",
+      "entities": [
+        {
+          "start": 11,
+          "end": 23,
+          "category": "PHONE",
+          "value": "555-867-5309"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "phone_intl_02",
+      "text": "Reach us at +1-202-555-0173 for support.",
+      "entities": [
+        {
+          "start": 12,
+          "end": 27,
+          "category": "PHONE",
+          "value": "+1-202-555-0173"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "phone_parens_03",
+      "text": "Phone: (415) 555-0198.",
+      "entities": [
+        {
+          "start": 7,
+          "end": 21,
+          "category": "PHONE",
+          "value": "(415) 555-0198"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "phone_dots_04",
+      "text": "Fax number: 800.555.0199.",
+      "entities": [
+        {
+          "start": 12,
+          "end": 24,
+          "category": "PHONE",
+          "value": "800.555.0199"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "phone_spaces_05",
+      "text": "Direct line: 212 555 0100.",
+      "entities": [
+        {
+          "start": 13,
+          "end": 25,
+          "category": "PHONE",
+          "value": "212 555 0100"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "phone_intl_uk_06",
+      "text": "UK office: +44 20 7946 0958.",
+      "entities": [
+        {
+          "start": 11,
+          "end": 27,
+          "category": "PHONE",
+          "value": "+44 20 7946 0958"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "phone_nospace_07",
+      "text": "Call 5558675310 now.",
+      "entities": [
+        {
+          "start": 5,
+          "end": 15,
+          "category": "PHONE",
+          "value": "5558675310"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "phone_multi_08",
+      "text": "Home: 555-111-2222, Work: 555-333-4444.",
+      "entities": [
+        {
+          "start": 6,
+          "end": 18,
+          "category": "PHONE",
+          "value": "555-111-2222"
+        },
+        {
+          "start": 26,
+          "end": 38,
+          "category": "PHONE",
+          "value": "555-333-4444"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "phone_intl_de_09",
+      "text": "Berlin office: +49 30 1234 5678.",
+      "entities": [
+        {
+          "start": 15,
+          "end": 31,
+          "category": "PHONE",
+          "value": "+49 30 1234 5678"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "phone_dash_10",
+      "text": "Emergency contact: 310-555-0142.",
+      "entities": [
+        {
+          "start": 19,
+          "end": 31,
+          "category": "PHONE",
+          "value": "310-555-0142"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "ip_simple_01",
+      "text": "Server is at 192.168.1.100 on the local network.",
+      "entities": [
+        {
+          "start": 13,
+          "end": 26,
+          "category": "IP_ADDRESS",
+          "value": "192.168.1.100"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "ip_localhost_02",
+      "text": "Connect to 127.0.0.1 for testing.",
+      "entities": [
+        {
+          "start": 11,
+          "end": 20,
+          "category": "IP_ADDRESS",
+          "value": "127.0.0.1"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "ip_public_03",
+      "text": "DNS resolver: 8.8.8.8 by Google.",
+      "entities": [
+        {
+          "start": 14,
+          "end": 21,
+          "category": "IP_ADDRESS",
+          "value": "8.8.8.8"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "ip_max_04",
+      "text": "The server at 192.168.1.200 responded.",
+      "entities": [
+        {
+          "start": 14,
+          "end": 27,
+          "category": "IP_ADDRESS",
+          "value": "192.168.1.200"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "ip_ten_05",
+      "text": "Gateway: 10.0.0.1 for VPN.",
+      "entities": [
+        {
+          "start": 9,
+          "end": 17,
+          "category": "IP_ADDRESS",
+          "value": "10.0.0.1"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "ip_class_b_06",
+      "text": "Assign 172.16.254.1 to the router.",
+      "entities": [
+        {
+          "start": 7,
+          "end": 19,
+          "category": "IP_ADDRESS",
+          "value": "172.16.254.1"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "apikey_sk_01",
+      "text": "Use sk-abc123def456ghi789jkl0123 for authentication.",
+      "entities": [
+        {
+          "start": 4,
+          "end": 32,
+          "category": "API_KEY",
+          "value": "sk-abc123def456ghi789jkl0123"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "apikey_pk_02",
+      "text": "Public key: pk_liveAbcdefghijklmnopqrst.",
+      "entities": [
+        {
+          "start": 12,
+          "end": 39,
+          "category": "API_KEY",
+          "value": "pk_liveAbcdefghijklmnopqrst"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "apikey_token_03",
+      "text": "Set tokenAbcdefghijKlmnOpqrstu in config.",
+      "entities": [
+        {
+          "start": 4,
+          "end": 30,
+          "category": "API_KEY",
+          "value": "tokenAbcdefghijKlmnOpqrstu"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "apikey_bearer_04",
+      "text": "Authorization: bearer_xyz123abc456def789ghi012.",
+      "entities": [
+        {
+          "start": 15,
+          "end": 46,
+          "category": "API_KEY",
+          "value": "bearer_xyz123abc456def789ghi012"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "apikey_secret_05",
+      "text": "Export secret_productionKeyAbc123def456.",
+      "entities": [
+        {
+          "start": 7,
+          "end": 39,
+          "category": "API_KEY",
+          "value": "secret_productionKeyAbc123def456"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "apikey_api_06",
+      "text": "The api_keyAbcdefghijklmnopqrstuvwx is active.",
+      "entities": [
+        {
+          "start": 4,
+          "end": 35,
+          "category": "API_KEY",
+          "value": "api_keyAbcdefghijklmnopqrstuvwx"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "apikey_key_07",
+      "text": "Pass key_abc123def456ghi789jkl01234 to the service.",
+      "entities": [
+        {
+          "start": 5,
+          "end": 35,
+          "category": "API_KEY",
+          "value": "key_abc123def456ghi789jkl01234"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "apikey_sk_long_08",
+      "text": "Old key: sk1234567890abcdefghijklmnop.",
+      "entities": [
+        {
+          "start": 9,
+          "end": 37,
+          "category": "API_KEY",
+          "value": "sk1234567890abcdefghijklmnop"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "aws_akia_01",
+      "text": "AWS access key: AKIAIOSFODNN7EXAMPLE.",
+      "entities": [
+        {
+          "start": 16,
+          "end": 36,
+          "category": "AWS_KEY",
+          "value": "AKIAIOSFODNN7EXAMPLE"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "aws_akia_02",
+      "text": "Config uses AKIAI44QH8DHBEXAMPLE for S3.",
+      "entities": [
+        {
+          "start": 12,
+          "end": 32,
+          "category": "AWS_KEY",
+          "value": "AKIAI44QH8DHBEXAMPLE"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "aws_asia_03",
+      "text": "Temporary creds: ASIA1234567890ABCDEF.",
+      "entities": [
+        {
+          "start": 17,
+          "end": 37,
+          "category": "AWS_KEY",
+          "value": "ASIA1234567890ABCDEF"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "aws_akia_04",
+      "text": "Set AKIAEXAMPLEKEY123456 in your environment.",
+      "entities": [
+        {
+          "start": 4,
+          "end": 24,
+          "category": "AWS_KEY",
+          "value": "AKIAEXAMPLEKEY123456"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "jwt_simple_01",
+      "text": "Token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U.",
+      "entities": [
+        {
+          "start": 7,
+          "end": 99,
+          "category": "JWT",
+          "value": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "jwt_bearer_02",
+      "text": "Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2V4YW1wbGUuY29tIn0.signature1234567890abcdefg.",
+      "entities": [
+        {
+          "start": 22,
+          "end": 125,
+          "category": "JWT",
+          "value": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2V4YW1wbGUuY29tIn0.signature1234567890abcdefg"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "jwt_access_03",
+      "text": "Access token is eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiam9obiJ9.abcdefghijklmnopqrst for session.",
+      "entities": [
+        {
+          "start": 16,
+          "end": 94,
+          "category": "JWT",
+          "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiam9obiJ9.abcdefghijklmnopqrst"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "jwt_refresh_04",
+      "text": "Refresh: eyJhbGciOiJIUzUxMiJ9.eyJleHAiOjE2OTkwMDAwMDB9.longsignaturevalueforsecurity.",
+      "entities": [
+        {
+          "start": 9,
+          "end": 84,
+          "category": "JWT",
+          "value": "eyJhbGciOiJIUzUxMiJ9.eyJleHAiOjE2OTkwMDAwMDB9.longsignaturevalueforsecurity"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "person_simple_01",
+      "text": "John Smith is the project lead.",
+      "entities": [
+        {
+          "start": 0,
+          "end": 10,
+          "category": "PERSON",
+          "value": "John Smith"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "person_full_02",
+      "text": "Contact Sarah Johnson for approvals.",
+      "entities": [
+        {
+          "start": 8,
+          "end": 21,
+          "category": "PERSON",
+          "value": "Sarah Johnson"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "person_three_03",
+      "text": "Report by Dr. Michael Brown is ready.",
+      "entities": [
+        {
+          "start": 14,
+          "end": 27,
+          "category": "PERSON",
+          "value": "Michael Brown"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "person_multi_04",
+      "text": "Alice Chen and Bob Martinez are co-founders.",
+      "entities": [
+        {
+          "start": 0,
+          "end": 10,
+          "category": "PERSON",
+          "value": "Alice Chen"
+        },
+        {
+          "start": 15,
+          "end": 27,
+          "category": "PERSON",
+          "value": "Bob Martinez"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "person_title_05",
+      "text": "CEO James Wilson announced the merger.",
+      "entities": [
+        {
+          "start": 4,
+          "end": 16,
+          "category": "PERSON",
+          "value": "James Wilson"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "person_initial_06",
+      "text": "The memo was signed by Robert K. Lee.",
+      "entities": [
+        {
+          "start": 23,
+          "end": 36,
+          "category": "PERSON",
+          "value": "Robert K. Lee"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "person_single_07",
+      "text": "Interview with Elizabeth Warren on Tuesday.",
+      "entities": [
+        {
+          "start": 15,
+          "end": 31,
+          "category": "PERSON",
+          "value": "Elizabeth Warren"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "person_asian_08",
+      "text": "Engineer Wei Zhang optimized the pipeline.",
+      "entities": [
+        {
+          "start": 9,
+          "end": 18,
+          "category": "PERSON",
+          "value": "Wei Zhang"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "org_simple_01",
+      "text": "We are partnering with Google on this project.",
+      "entities": [
+        {
+          "start": 23,
+          "end": 29,
+          "category": "ORG",
+          "value": "Google"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "org_corp_02",
+      "text": "Acme Corporation filed the patent.",
+      "entities": [
+        {
+          "start": 0,
+          "end": 16,
+          "category": "ORG",
+          "value": "Acme Corporation"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "org_univ_03",
+      "text": "Research from MIT shows promising results.",
+      "entities": [
+        {
+          "start": 14,
+          "end": 17,
+          "category": "ORG",
+          "value": "MIT"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "org_multi_04",
+      "text": "The deal between Microsoft and Amazon was announced.",
+      "entities": [
+        {
+          "start": 17,
+          "end": 26,
+          "category": "ORG",
+          "value": "Microsoft"
+        },
+        {
+          "start": 31,
+          "end": 37,
+          "category": "ORG",
+          "value": "Amazon"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "org_inc_05",
+      "text": "Submit to TechStart Inc for review.",
+      "entities": [
+        {
+          "start": 10,
+          "end": 23,
+          "category": "ORG",
+          "value": "TechStart Inc"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "org_ngo_06",
+      "text": "Funded by the United Nations Development Programme.",
+      "entities": [
+        {
+          "start": 14,
+          "end": 50,
+          "category": "ORG",
+          "value": "United Nations Development Programme"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "gpe_city_01",
+      "text": "The conference is in San Francisco this year.",
+      "entities": [
+        {
+          "start": 21,
+          "end": 34,
+          "category": "GPE",
+          "value": "San Francisco"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "gpe_country_02",
+      "text": "Our headquarters are in Germany.",
+      "entities": [
+        {
+          "start": 24,
+          "end": 31,
+          "category": "GPE",
+          "value": "Germany"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "gpe_multi_03",
+      "text": "Offices in London and Tokyo serve APAC.",
+      "entities": [
+        {
+          "start": 11,
+          "end": 17,
+          "category": "GPE",
+          "value": "London"
+        },
+        {
+          "start": 22,
+          "end": 27,
+          "category": "GPE",
+          "value": "Tokyo"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "gpe_state_04",
+      "text": "Data center in California handles west coast traffic.",
+      "entities": [
+        {
+          "start": 15,
+          "end": 25,
+          "category": "GPE",
+          "value": "California"
+        }
+      ],
+      "tags": [
+        "ner"
+      ]
+    },
+    {
+      "id": "multi_email_phone_01",
+      "text": "Contact Jane Doe at jane.doe@corp.com or call 555-867-5309.",
+      "entities": [
+        {
+          "start": 8,
+          "end": 16,
+          "category": "PERSON",
+          "value": "Jane Doe"
+        },
+        {
+          "start": 20,
+          "end": 37,
+          "category": "EMAIL",
+          "value": "jane.doe@corp.com"
+        },
+        {
+          "start": 46,
+          "end": 58,
+          "category": "PHONE",
+          "value": "555-867-5309"
+        }
+      ],
+      "tags": [
+        "multi",
+        "ner"
+      ]
+    },
+    {
+      "id": "multi_ssn_email_02",
+      "text": "Employee SSN 234-56-7891 email hr@company.com.",
+      "entities": [
+        {
+          "start": 13,
+          "end": 24,
+          "category": "SSN",
+          "value": "234-56-7891"
+        },
+        {
+          "start": 31,
+          "end": 45,
+          "category": "EMAIL",
+          "value": "hr@company.com"
+        }
+      ],
+      "tags": [
+        "multi"
+      ]
+    },
+    {
+      "id": "multi_cc_phone_03",
+      "text": "Card 4111111111111111 phone 800-555-0101.",
+      "entities": [
+        {
+          "start": 5,
+          "end": 21,
+          "category": "CREDIT_CARD",
+          "value": "4111111111111111"
+        },
+        {
+          "start": 28,
+          "end": 40,
+          "category": "PHONE",
+          "value": "800-555-0101"
+        }
+      ],
+      "tags": [
+        "multi"
+      ]
+    },
+    {
+      "id": "multi_ip_email_04",
+      "text": "Server 10.0.1.50 admin at ops@infra.net.",
+      "entities": [
+        {
+          "start": 7,
+          "end": 16,
+          "category": "IP_ADDRESS",
+          "value": "10.0.1.50"
+        },
+        {
+          "start": 26,
+          "end": 39,
+          "category": "EMAIL",
+          "value": "ops@infra.net"
+        }
+      ],
+      "tags": [
+        "multi"
+      ]
+    },
+    {
+      "id": "multi_person_org_email_05",
+      "text": "John Smith at Acme Corp uses john@acme.com.",
+      "entities": [
+        {
+          "start": 0,
+          "end": 10,
+          "category": "PERSON",
+          "value": "John Smith"
+        },
+        {
+          "start": 14,
+          "end": 23,
+          "category": "ORG",
+          "value": "Acme Corp"
+        },
+        {
+          "start": 29,
+          "end": 42,
+          "category": "EMAIL",
+          "value": "john@acme.com"
+        }
+      ],
+      "tags": [
+        "multi",
+        "ner"
+      ]
+    },
+    {
+      "id": "multi_aws_email_06",
+      "text": "Key AKIAIOSFODNN7EXAMPLE send to admin@aws.com.",
+      "entities": [
+        {
+          "start": 4,
+          "end": 24,
+          "category": "AWS_KEY",
+          "value": "AKIAIOSFODNN7EXAMPLE"
+        },
+        {
+          "start": 33,
+          "end": 46,
+          "category": "EMAIL",
+          "value": "admin@aws.com"
+        }
+      ],
+      "tags": [
+        "multi"
+      ]
+    },
+    {
+      "id": "multi_iban_phone_07",
+      "text": "IBAN DE89370400440532013000 call +49 30 1234 5679.",
+      "entities": [
+        {
+          "start": 34,
+          "end": 49,
+          "category": "PHONE",
+          "value": "49 30 1234 5679"
+        }
+      ],
+      "tags": [
+        "regex"
+      ]
+    },
+    {
+      "id": "multi_three_emails_08",
+      "text": "Send to a@b.com, c@d.org, and e@f.net.",
+      "entities": [
+        {
+          "start": 8,
+          "end": 15,
+          "category": "EMAIL",
+          "value": "a@b.com"
+        },
+        {
+          "start": 17,
+          "end": 24,
+          "category": "EMAIL",
+          "value": "c@d.org"
+        },
+        {
+          "start": 30,
+          "end": 37,
+          "category": "EMAIL",
+          "value": "e@f.net"
+        }
+      ],
+      "tags": [
+        "multi"
+      ]
+    },
+    {
+      "id": "multi_person_phone_gpe_09",
+      "text": "Sarah in New York can be reached at 212-555-0199.",
+      "entities": [
+        {
+          "start": 0,
+          "end": 5,
+          "category": "PERSON",
+          "value": "Sarah"
+        },
+        {
+          "start": 9,
+          "end": 17,
+          "category": "GPE",
+          "value": "New York"
+        },
+        {
+          "start": 36,
+          "end": 48,
+          "category": "PHONE",
+          "value": "212-555-0199"
+        }
+      ],
+      "tags": [
+        "multi",
+        "ner"
+      ]
+    },
+    {
+      "id": "multi_ssn_cc_10",
+      "text": "SSN 345-67-8902 card 5105105105105100.",
+      "entities": [
+        {
+          "start": 4,
+          "end": 15,
+          "category": "SSN",
+          "value": "345-67-8902"
+        },
+        {
+          "start": 21,
+          "end": 37,
+          "category": "CREDIT_CARD",
+          "value": "5105105105105100"
+        }
+      ],
+      "tags": [
+        "multi"
+      ]
+    },
+    {
+      "id": "multi_apikey_ip_11",
+      "text": "Use sk_testAbcdefghijKlmnOpqrst on 192.168.0.1.",
+      "entities": [
+        {
+          "start": 4,
+          "end": 31,
+          "category": "API_KEY",
+          "value": "sk_testAbcdefghijKlmnOpqrst"
+        },
+        {
+          "start": 35,
+          "end": 46,
+          "category": "IP_ADDRESS",
+          "value": "192.168.0.1"
+        }
+      ],
+      "tags": [
+        "multi"
+      ]
+    },
+    {
+      "id": "multi_full_12",
+      "text": "File for John Smith: SSN 456-78-9013, email john@test.com, phone 555-000-1234.",
+      "entities": [
+        {
+          "start": 9,
+          "end": 19,
+          "category": "PERSON",
+          "value": "John Smith"
+        },
+        {
+          "start": 25,
+          "end": 36,
+          "category": "SSN",
+          "value": "456-78-9013"
+        },
+        {
+          "start": 44,
+          "end": 57,
+          "category": "EMAIL",
+          "value": "john@test.com"
+        },
+        {
+          "start": 65,
+          "end": 77,
+          "category": "PHONE",
+          "value": "555-000-1234"
+        }
+      ],
+      "tags": [
+        "multi",
+        "ner"
+      ]
+    },
+    {
+      "id": "neg_plain_01",
+      "text": "The weather is nice today.",
+      "entities": [],
+      "tags": [
+        "negative"
+      ]
+    },
+    {
+      "id": "neg_plain_02",
+      "text": "Please review the quarterly report by Friday.",
+      "entities": [],
+      "tags": [
+        "negative"
+      ]
+    },
+    {
+      "id": "neg_numbers_03",
+      "text": "The answer is 42 and the year is 2024.",
+      "entities": [],
+      "tags": [
+        "negative"
+      ]
+    },
+    {
+      "id": "neg_version_04",
+      "text": "Python version 3.11.5 is recommended.",
+      "entities": [],
+      "tags": [
+        "negative"
+      ]
+    },
+    {
+      "id": "neg_math_05",
+      "text": "Calculate 100 + 200 = 300 for the total.",
+      "entities": [],
+      "tags": [
+        "negative"
+      ]
+    },
+    {
+      "id": "neg_url_06",
+      "text": "Visit https://example.com/page for docs.",
+      "entities": [],
+      "tags": [
+        "negative"
+      ]
+    },
+    {
+      "id": "neg_date_07",
+      "text": "Meeting scheduled for March 15, 2026.",
+      "entities": [],
+      "tags": [
+        "negative"
+      ]
+    },
+    {
+      "id": "neg_code_08",
+      "text": "Use array[0] to access the first element.",
+      "entities": [],
+      "tags": [
+        "negative"
+      ]
+    },
+    {
+      "id": "neg_sentence_09",
+      "text": "The quick brown fox jumps over the lazy dog.",
+      "entities": [],
+      "tags": [
+        "negative"
+      ]
+    },
+    {
+      "id": "neg_tech_10",
+      "text": "Install Node.js version 18 or higher.",
+      "entities": [],
+      "tags": [
+        "negative"
+      ]
+    },
+    {
+      "id": "adv_obfuscated_email_01",
+      "text": "Reach me at john [dot] doe [at] example [dot] com.",
+      "entities": [],
+      "tags": [
+        "adversarial"
+      ]
+    },
+    {
+      "id": "adv_partial_ssn_02",
+      "text": "Last four of SSN: 6789.",
+      "entities": [],
+      "tags": [
+        "adversarial"
+      ]
+    },
+    {
+      "id": "adv_masked_cc_03",
+      "text": "Card ending in ****1234.",
+      "entities": [],
+      "tags": [
+        "adversarial"
+      ]
+    },
+    {
+      "id": "adv_spaced_ssn_04",
+      "text": "My number is 1 2 3 4 5 6 7 8 9.",
+      "entities": [],
+      "tags": [
+        "adversarial"
+      ]
+    },
+    {
+      "id": "adv_wordy_05",
+      "text": "Email me at john at example dot com please.",
+      "entities": [],
+      "tags": [
+        "adversarial"
+      ]
+    },
+    {
+      "id": "adv_hex_06",
+      "text": "ID code: 0x1A2B3C4D5E6F.",
+      "entities": [],
+      "tags": [
+        "adversarial"
+      ]
+    },
+    {
+      "id": "adv_phone_words_07",
+      "text": "Call 1-800-FLOWERS for delivery.",
+      "entities": [],
+      "tags": [
+        "adversarial"
+      ]
+    },
+    {
+      "id": "adv_near_ip_08",
+      "text": "Score breakdown: 192.168 out of 200.000 points.",
+      "entities": [],
+      "tags": [
+        "adversarial"
+      ]
+    }
+  ]
+}

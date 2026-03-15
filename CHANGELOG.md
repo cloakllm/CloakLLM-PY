@@ -5,6 +5,15 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-03-15
+
+### Added
+
+- Detection benchmark suite: 108-sample labeled PII corpus (`benchmarks/corpus.json`)
+- Benchmark harness measuring recall/precision/F1 per detection category (`benchmarks/evaluate.py`)
+- CI-integrated threshold tests: overall recall >= 95%, precision >= 80%, per-category recall >= 80%
+- CLI: `python -m benchmarks.evaluate [--json] [--no-ner]` for standalone benchmark runs
+
 ## [0.3.0] - 2026-03-15
 
 ### Added
