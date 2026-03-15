@@ -316,9 +316,7 @@ class Shield:
         }
 
         # Accumulate metrics
-        self._metrics["calls"]["desanitize_batch"] += 1
-        self._metrics["total_ms"] += elapsed_ms
-        self._metrics["tokenization_ms"] += tokenization_ms
+        self._accumulate_metrics("desanitize_batch", elapsed_ms, {}, tokenization_ms, 0, {})
 
         self.audit.log(
             event_type="desanitize_batch",
@@ -373,9 +371,7 @@ class Shield:
         }
 
         # Accumulate metrics
-        self._metrics["calls"]["desanitize"] += 1
-        self._metrics["total_ms"] += elapsed_ms
-        self._metrics["tokenization_ms"] += tokenization_ms
+        self._accumulate_metrics("desanitize", elapsed_ms, {}, tokenization_ms, 0, {})
 
         # Audit log
         self.audit.log(
