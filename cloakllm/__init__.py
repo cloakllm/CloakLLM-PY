@@ -19,7 +19,7 @@ Standalone usage:
     # sanitized: "Send email to [EMAIL_0] about [ORG_0]"
 """
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 from cloakllm.shield import Shield
 from cloakllm.config import ShieldConfig
@@ -28,6 +28,12 @@ from cloakllm.integrations.litellm_middleware import enable, disable, get_shield
 from cloakllm.integrations.openai_middleware import (
     enable as enable_openai,
     disable as disable_openai,
+)
+from cloakllm.attestation import (
+    DeploymentKeyPair,
+    SanitizationCertificate,
+    MerkleTree,
+    derive_entity_hash_key,
 )
 
 __all__ = [
@@ -40,4 +46,8 @@ __all__ = [
     "is_enabled",
     "enable_openai",
     "disable_openai",
+    "DeploymentKeyPair",
+    "SanitizationCertificate",
+    "MerkleTree",
+    "derive_entity_hash_key",
 ]

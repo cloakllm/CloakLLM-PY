@@ -12,7 +12,7 @@ import hashlib
 import hmac
 import re
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 from cloakllm.config import ShieldConfig
 from cloakllm.detector import Detection
@@ -44,6 +44,10 @@ class TokenMap:
     # Entity hashing
     entity_hashing: bool = False
     entity_hash_key: str = ""
+    # Attestation (set by Shield when attestation is enabled)
+    certificate: Optional[Any] = None
+    batch_certificate: Optional[Any] = None
+    merkle_tree: Optional[Any] = None
 
     def _compute_entity_hash(self, category: str, original_text: str) -> str:
         """Compute HMAC-SHA256 hash for an entity: HMAC(key, "CATEGORY:normalized")."""

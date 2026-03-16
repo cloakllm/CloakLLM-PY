@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Optional
 
 
 @dataclass
@@ -85,6 +86,14 @@ class ShieldConfig:
     )
     otel_service_name: str = field(
         default_factory=lambda: os.getenv("OTEL_SERVICE_NAME", "cloakllm")
+    )
+
+    # --- Attestation (Ed25519 signing) ---
+    # Pre-loaded DeploymentKeyPair object (from cloakllm.attestation)
+    attestation_key: Optional[Any] = None
+    # Path to keypair JSON file (loaded on Shield init)
+    attestation_key_path: Optional[str] = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_SIGNING_KEY_PATH", None)
     )
 
     # --- LiteLLM Integration ---

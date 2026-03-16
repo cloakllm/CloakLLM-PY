@@ -17,6 +17,11 @@ from cloakllm.audit import AuditLogger
 from cloakllm.config import ShieldConfig
 from cloakllm.detector import DetectionEngine
 from cloakllm.tokenizer import TokenMap, Tokenizer
+from cloakllm.attestation import (
+    DeploymentKeyPair,
+    MerkleTree,
+    SanitizationCertificate,
+)
 
 
 class Shield:
@@ -46,6 +51,16 @@ class Shield:
         # Resolve entity hash key once (auto-generate if needed)
         if self.config.entity_hashing and not self.config.entity_hash_key:
             self.config.entity_hash_key = secrets.token_hex(32)
+
+        # Load attestation keypair (from config object or file path)
+        self._attestation_key: Optional[DeploymentKeyPair] = None
+        if self.config.attestation_key is not None:
+            self._attestation_key = self.config.attestation_key
+        elif self.config.attestation_key_path:
+            from pathlib import Path
+            self._attestation_key = DeploymentKeyPair.from_file(
+                Path(self.config.attestation_key_path)
+            )
 
     @staticmethod
     def _empty_metrics() -> dict[str, Any]:
@@ -138,6 +153,28 @@ class Shield:
             tokenization_ms, len(detections), token_map.categories,
         )
 
+        # Create attestation certificate if signing key is configured
+        cert_hash = None
+        cert_key_id = None
+        if self._attestation_key is not None:
+            detection_passes = ["regex"]
+            if self.detector._nlp is not None and "ner" in self.detector._nlp.pipe_names:
+                detection_passes.append("ner")
+            if self.config.llm_detection:
+                detection_passes.append("llm")
+            cert = SanitizationCertificate.create(
+                original_text=text,
+                sanitized_text=sanitized,
+                entity_count=len(detections),
+                categories=token_map.categories,
+                detection_passes=detection_passes,
+                mode=self.config.mode,
+                keypair=self._attestation_key,
+            )
+            token_map.certificate = cert
+            cert_hash = hashlib.sha256(cert.signature.encode()).hexdigest()
+            cert_key_id = cert.key_id
+
         # Audit log
         self.audit.log(
             event_type="sanitize",
@@ -153,6 +190,8 @@ class Shield:
             entity_details=token_map.entity_details,
             timing=timing,
             metadata=metadata,
+            certificate_hash=cert_hash,
+            key_id=cert_key_id,
         )
 
         return sanitized, token_map
@@ -254,6 +293,41 @@ class Shield:
             total_tokenization_ms, total_detections, token_map.categories,
         )
 
+        # Create batch attestation certificate with Merkle roots
+        cert_hash = None
+        cert_key_id = None
+        if self._attestation_key is not None:
+            input_hashes = [hashlib.sha256(t.encode()).hexdigest() for t in texts]
+            output_hashes = [hashlib.sha256(t.encode()).hexdigest() for t in sanitized_texts]
+            input_tree = MerkleTree(input_hashes)
+            output_tree = MerkleTree(output_hashes)
+
+            detection_passes = ["regex"]
+            if self.detector._nlp is not None and "ner" in self.detector._nlp.pipe_names:
+                detection_passes.append("ner")
+            if self.config.llm_detection:
+                detection_passes.append("llm")
+
+            cert = SanitizationCertificate.create(
+                original_text=None,
+                sanitized_text=None,
+                entity_count=total_detections,
+                categories=token_map.categories,
+                detection_passes=detection_passes,
+                mode=self.config.mode,
+                keypair=self._attestation_key,
+                input_merkle_root=input_tree.root,
+                output_merkle_root=output_tree.root,
+            )
+            token_map.certificate = cert
+            token_map.batch_certificate = cert
+            token_map.merkle_tree = {
+                "input": input_tree,
+                "output": output_tree,
+            }
+            cert_hash = hashlib.sha256(cert.signature.encode()).hexdigest()
+            cert_key_id = cert.key_id
+
         # Build per-text hashes for audit metadata
         audit_metadata = dict(metadata) if metadata else {}
         audit_metadata["prompt_hashes"] = [
@@ -277,6 +351,8 @@ class Shield:
             entity_details=all_entity_details,
             timing=timing,
             metadata=audit_metadata,
+            certificate_hash=cert_hash,
+            key_id=cert_key_id,
         )
 
         return sanitized_texts, token_map
@@ -441,3 +517,32 @@ class Shield:
     def audit_stats(self) -> dict:
         """Get aggregate audit statistics."""
         return self.audit.get_stats()
+
+    def verify_certificate(
+        self,
+        certificate: Any,
+        public_key: Optional[bytes] = None,
+    ) -> bool:
+        """
+        Verify a sanitization certificate's signature.
+
+        Args:
+            certificate: A SanitizationCertificate instance (or dict from cert.to_dict())
+            public_key: Ed25519 public key bytes. If None, uses the Shield's attestation key.
+
+        Returns:
+            True if signature is valid, False otherwise.
+        """
+        if isinstance(certificate, dict):
+            certificate = SanitizationCertificate.from_dict(certificate)
+        if public_key is None:
+            if self._attestation_key is not None:
+                public_key = self._attestation_key.public_key
+            else:
+                raise ValueError("No public key provided and no attestation key configured")
+        return certificate.verify(public_key)
+
+    @staticmethod
+    def generate_attestation_key() -> DeploymentKeyPair:
+        """Generate a new Ed25519 deployment keypair for attestation."""
+        return DeploymentKeyPair.generate()

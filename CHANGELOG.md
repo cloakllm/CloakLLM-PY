@@ -5,6 +5,23 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-03-15
+
+### Added
+
+- **Cryptographic attestation** — Ed25519 digital signatures for sanitization certificates
+  - `DeploymentKeyPair` — generate, save, load Ed25519 signing keys
+  - `SanitizationCertificate` — signed proof that a sanitization operation occurred (input/output hashes, entity count, categories, detection passes, mode)
+  - `MerkleTree` — binary Merkle tree for batch attestation with proof generation and verification
+  - `derive_entity_hash_key()` — HKDF-SHA256 key derivation (stdlib only, no optional deps)
+  - `shield.verify_certificate()` — verify a certificate's signature
+  - `Shield.generate_attestation_key()` — convenience static method
+- Attestation config: `attestation_key`, `attestation_key_path`, `CLOAKLLM_SIGNING_KEY_PATH` env var
+- Certificate attached to `token_map.certificate` after `sanitize()` and `sanitize_batch()`
+- Batch certificates include Merkle roots for input/output hashes (`token_map.merkle_tree`)
+- Audit log entries include `certificate_hash` and `key_id` fields (null when attestation disabled)
+- Optional dependency group: `pip install cloakllm[attestation]` (pynacl) or use `cryptography`
+
 ## [0.3.1] - 2026-03-15
 
 ### Added

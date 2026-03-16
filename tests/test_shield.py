@@ -1212,3 +1212,209 @@ class TestEntityHashing:
         tm = TokenMap(entity_hashing=True, entity_hash_key=key)
         actual = tm._compute_entity_hash(category, text)
         assert actual == expected
+
+
+# ── Attestation Integration ─────────────────────────────────
+
+
+class TestAttestationIntegration:
+    """Integration tests for cryptographic attestation in Shield."""
+
+    @pytest.fixture
+    def keypair(self):
+        from cloakllm.attestation import DeploymentKeyPair
+        return DeploymentKeyPair.generate()
+
+    def test_sanitize_creates_certificate(self, keypair, tmp_path):
+        """Shield.sanitize attaches a certificate when attestation key is configured."""
+        shield = Shield(ShieldConfig(attestation_key=keypair, log_dir=tmp_path))
+        _, tm = shield.sanitize("Email john@acme.com")
+        assert tm.certificate is not None
+        assert tm.certificate.verify(keypair.public_key)
+
+    def test_sanitize_no_key_no_certificate(self, tmp_path):
+        """Without attestation key, no certificate is created."""
+        shield = Shield(ShieldConfig(log_dir=tmp_path))
+        _, tm = shield.sanitize("Email john@acme.com")
+        assert tm.certificate is None
+
+    def test_certificate_hashes_match(self, keypair, tmp_path):
+        """Certificate input/output hashes match SHA-256 of original/sanitized text."""
+        import hashlib
+        shield = Shield(ShieldConfig(attestation_key=keypair, log_dir=tmp_path))
+        text = "Email john@acme.com about Project Falcon"
+        sanitized, tm = shield.sanitize(text)
+        cert = tm.certificate
+        assert cert.input_hash == hashlib.sha256(text.encode()).hexdigest()
+        assert cert.output_hash == hashlib.sha256(sanitized.encode()).hexdigest()
+
+    def test_certificate_entity_count_and_categories(self, keypair, tmp_path):
+        """Certificate captures entity stats correctly."""
+        shield = Shield(ShieldConfig(attestation_key=keypair, log_dir=tmp_path))
+        _, tm = shield.sanitize("Email john@acme.com and call 555-123-4567")
+        cert = tm.certificate
+        assert cert.entity_count >= 2
+        assert "EMAIL" in cert.categories
+
+    def test_certificate_mode_matches_config(self, keypair, tmp_path):
+        """Certificate mode matches Shield config mode."""
+        shield = Shield(ShieldConfig(attestation_key=keypair, log_dir=tmp_path, mode="redact"))
+        _, tm = shield.sanitize("Email john@acme.com")
+        assert tm.certificate.mode == "redact"
+
+    def test_certificate_detection_passes(self, keypair, tmp_path):
+        """Certificate includes at least 'regex' in detection_passes."""
+        shield = Shield(ShieldConfig(attestation_key=keypair, log_dir=tmp_path))
+        _, tm = shield.sanitize("Email john@acme.com")
+        assert "regex" in tm.certificate.detection_passes
+
+    def test_certificate_tamper_detection(self, keypair, tmp_path):
+        """Tampering with certificate fields fails verification."""
+        shield = Shield(ShieldConfig(attestation_key=keypair, log_dir=tmp_path))
+        _, tm = shield.sanitize("Email john@acme.com")
+        cert = tm.certificate
+        cert.entity_count = 999
+        assert cert.verify(keypair.public_key) is False
+
+    def test_certificate_to_dict_and_back(self, keypair, tmp_path):
+        """Certificate roundtrips through dict serialization."""
+        from cloakllm.attestation import SanitizationCertificate
+        shield = Shield(ShieldConfig(attestation_key=keypair, log_dir=tmp_path))
+        _, tm = shield.sanitize("Email john@acme.com")
+        d = tm.certificate.to_dict()
+        cert2 = SanitizationCertificate.from_dict(d)
+        assert cert2.verify(keypair.public_key)
+
+    def test_verify_certificate_method(self, keypair, tmp_path):
+        """Shield.verify_certificate works with certificate and dict."""
+        shield = Shield(ShieldConfig(attestation_key=keypair, log_dir=tmp_path))
+        _, tm = shield.sanitize("Email john@acme.com")
+        assert shield.verify_certificate(tm.certificate) is True
+        assert shield.verify_certificate(tm.certificate.to_dict()) is True
+
+    def test_verify_certificate_wrong_key(self, keypair, tmp_path):
+        """Verification with wrong key fails."""
+        from cloakllm.attestation import DeploymentKeyPair
+        shield = Shield(ShieldConfig(attestation_key=keypair, log_dir=tmp_path))
+        _, tm = shield.sanitize("Email john@acme.com")
+        other_kp = DeploymentKeyPair.generate()
+        assert shield.verify_certificate(tm.certificate, public_key=other_kp.public_key) is False
+
+    def test_batch_creates_certificate(self, keypair, tmp_path):
+        """sanitize_batch creates certificate with Merkle roots."""
+        shield = Shield(ShieldConfig(attestation_key=keypair, log_dir=tmp_path))
+        texts = ["Email john@acme.com", "Call 555-123-4567"]
+        _, tm = shield.sanitize_batch(texts)
+        assert tm.certificate is not None
+        assert tm.batch_certificate is not None
+        assert tm.merkle_tree is not None
+        assert tm.certificate.verify(keypair.public_key)
+
+    def test_batch_merkle_proofs(self, keypair, tmp_path):
+        """Batch Merkle proofs verify for each input text."""
+        import hashlib
+        from cloakllm.attestation import MerkleTree
+        shield = Shield(ShieldConfig(attestation_key=keypair, log_dir=tmp_path))
+        texts = ["Email john@acme.com", "Call 555-123-4567", "SSN 123-45-6789"]
+        sanitized_texts, tm = shield.sanitize_batch(texts)
+        input_tree = tm.merkle_tree["input"]
+        output_tree = tm.merkle_tree["output"]
+        for i, text in enumerate(texts):
+            leaf = hashlib.sha256(text.encode()).hexdigest()
+            proof = input_tree.proof(i)
+            assert MerkleTree.verify_proof(leaf, proof, input_tree.root)
+        # Also verify output tree
+        for i, text in enumerate(sanitized_texts):
+            leaf = hashlib.sha256(text.encode()).hexdigest()
+            proof = output_tree.proof(i)
+            assert MerkleTree.verify_proof(leaf, proof, output_tree.root)
+
+    def test_sanitize_no_pii_with_attestation(self, keypair, tmp_path):
+        """Attestation works on text with no PII (entity_count=0)."""
+        shield = Shield(ShieldConfig(attestation_key=keypair, log_dir=tmp_path))
+        sanitized, tm = shield.sanitize("The weather is nice today")
+        assert sanitized == "The weather is nice today"
+        assert tm.certificate is not None
+        assert tm.certificate.entity_count == 0
+        assert tm.certificate.categories == {}
+        assert tm.certificate.verify(keypair.public_key)
+
+    def test_batch_single_item(self, keypair, tmp_path):
+        """Batch with a single text creates valid Merkle tree and certificate."""
+        from cloakllm.attestation import MerkleTree
+        shield = Shield(ShieldConfig(attestation_key=keypair, log_dir=tmp_path))
+        sanitized_texts, tm = shield.sanitize_batch(["Email john@acme.com"])
+        assert tm.certificate is not None
+        assert tm.certificate.verify(keypair.public_key)
+        assert tm.merkle_tree is not None
+        # Single-leaf Merkle tree: root = leaf hash
+        import hashlib
+        expected_root = hashlib.sha256("Email john@acme.com".encode()).hexdigest()
+        assert tm.merkle_tree["input"].root == expected_root
+
+    def test_batch_no_key_no_certificate(self, tmp_path):
+        """Batch without attestation key produces no certificate."""
+        shield = Shield(ShieldConfig(log_dir=tmp_path))
+        _, tm = shield.sanitize_batch(["a", "b"])
+        assert tm.certificate is None
+        assert tm.merkle_tree is None
+
+    def test_audit_includes_certificate_fields(self, keypair, tmp_path):
+        """Audit log entries include certificate_hash and key_id."""
+        import json
+        shield = Shield(ShieldConfig(attestation_key=keypair, log_dir=tmp_path))
+        shield.sanitize("Email john@acme.com")
+        log_files = list(tmp_path.glob("audit_*.jsonl"))
+        assert len(log_files) == 1
+        with open(log_files[0]) as f:
+            entry = json.loads(f.readline())
+        assert entry["certificate_hash"] is not None
+        assert entry["key_id"] == keypair.key_id
+
+    def test_audit_no_attestation_null_fields(self, tmp_path):
+        """Without attestation, certificate_hash and key_id are null."""
+        import json
+        shield = Shield(ShieldConfig(log_dir=tmp_path))
+        shield.sanitize("Email john@acme.com")
+        log_files = list(tmp_path.glob("audit_*.jsonl"))
+        with open(log_files[0]) as f:
+            entry = json.loads(f.readline())
+        assert entry["certificate_hash"] is None
+        assert entry["key_id"] is None
+
+    def test_audit_chain_valid_with_attestation(self, keypair, tmp_path):
+        """Audit chain remains valid when attestation fields are present."""
+        shield = Shield(ShieldConfig(attestation_key=keypair, log_dir=tmp_path))
+        shield.sanitize("Email john@acme.com")
+        shield.sanitize("Call 555-123-4567")
+        shield.sanitize_batch(["test1", "test2"])
+        valid, errors = shield.verify_audit()
+        assert valid is True, f"Audit chain broken: {errors}"
+
+    def test_attestation_key_from_file(self, keypair, tmp_path):
+        """Shield loads attestation key from file path."""
+        key_path = tmp_path / "key.json"
+        keypair.save(key_path)
+        shield = Shield(ShieldConfig(attestation_key_path=str(key_path), log_dir=tmp_path / "logs"))
+        _, tm = shield.sanitize("Email john@acme.com")
+        assert tm.certificate is not None
+        assert tm.certificate.verify(keypair.public_key)
+
+    def test_generate_attestation_key(self):
+        """Shield.generate_attestation_key creates a valid keypair."""
+        kp = Shield.generate_attestation_key()
+        assert len(kp.public_key) == 32
+        assert len(kp.private_key) == 32
+
+    def test_multi_turn_with_attestation(self, keypair, tmp_path):
+        """Multi-turn conversation gets fresh certificates each call."""
+        shield = Shield(ShieldConfig(attestation_key=keypair, log_dir=tmp_path))
+        _, tm = shield.sanitize("Email john@acme.com")
+        cert1 = tm.certificate
+        _, tm = shield.sanitize("Call 555-123-4567", token_map=tm)
+        cert2 = tm.certificate
+        # Each call gets a fresh certificate
+        assert cert1 is not cert2
+        assert cert1.signature != cert2.signature
+        assert cert1.verify(keypair.public_key)
+        assert cert2.verify(keypair.public_key)
