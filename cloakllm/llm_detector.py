@@ -6,6 +6,12 @@ and spaCy NER miss (addresses, medical info, financial data, etc.).
 
 Opt-in via config: ShieldConfig(llm_detection=True)
 Data never leaves the user's machine.
+
+SECURITY NOTE: LLM-based detection is advisory and non-deterministic.
+It must never be the sole detection mechanism. The LLM may miss entities
+or hallucinate false detections. Always use in combination with regex
+and NER detection (Pass 1 and Pass 2). The LLM prompt is not hardened
+against prompt injection — adversarial input text could manipulate results.
 """
 
 from __future__ import annotations
@@ -16,6 +22,11 @@ import re
 import urllib.error
 import urllib.request
 from collections import OrderedDict
+import hashlib
+import ipaddress
+import socket
+import threading
+import urllib.parse
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -48,20 +59,85 @@ class _BoundedCache:
     def __init__(self, maxsize: int = 1024):
         self._cache: OrderedDict[str, _CachedResult] = OrderedDict()
         self._maxsize = maxsize
+        self._lock = threading.Lock()
 
     def get(self, key: str) -> _CachedResult | None:
-        if key in self._cache:
-            self._cache.move_to_end(key)
-            return self._cache[key]
-        return None
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+                return self._cache[key]
+            return None
 
     def set(self, key: str, value: _CachedResult) -> None:
-        self._cache[key] = value
-        if len(self._cache) > self._maxsize:
-            self._cache.popitem(last=False)
+        with self._lock:
+            self._cache[key] = value
+            if len(self._cache) > self._maxsize:
+                self._cache.popitem(last=False)
 
     def clear(self) -> None:
-        self._cache.clear()
+        with self._lock:
+            self._cache.clear()
+
+
+# Private IP ranges for URL validation
+_PRIVATE_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+
+def _validate_ollama_url(url: str, allow_remote: bool) -> str:
+    """Validate that the Ollama URL points to a local/private address."""
+    parsed = urllib.parse.urlparse(url)
+    hostname = parsed.hostname or ""
+
+    # Fast path for common localhost names
+    if hostname in ("localhost", "127.0.0.1", "::1"):
+        return url
+
+    try:
+        infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for _family, _type, _proto, _canonname, sockaddr in infos:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if any(ip in net for net in _PRIVATE_NETWORKS):
+                return url
+    except (socket.gaierror, ValueError, OSError):
+        pass
+
+    if allow_remote:
+        logger.warning(
+            "CloakLLM: Ollama URL '%s' points to a non-local address. "
+            "PII data will be sent to this remote server.", url
+        )
+        return url
+
+    raise ValueError(
+        f"CloakLLM: Ollama URL '{url}' points to a non-local address. "
+        f"Set llm_allow_remote=True to allow remote Ollama instances. "
+        f"WARNING: PII data will be sent to the remote server."
+    )
+
+
+_LOCALE_HINTS = {
+    "de": "The input text is in German. Look for German PII formats (Steuer-ID, IBAN DE, German phone numbers, addresses).",
+    "fr": "The input text is in French. Look for French PII formats (NIR/Sécu, IBAN FR, French phone numbers, addresses).",
+    "es": "The input text is in Spanish. Look for Spanish PII formats (DNI, NIE, IBAN ES, Spanish phone numbers, addresses).",
+    "nl": "The input text is in Dutch. Look for Dutch PII formats (BSN, IBAN NL, Dutch phone numbers, addresses).",
+    "he": "The input text is in Hebrew. Look for Israeli PII formats (Teudat Zehut, Israeli phone numbers, addresses).",
+    "zh": "The input text is in Chinese. Look for Chinese PII formats (身份证号, Chinese phone numbers, addresses).",
+    "ja": "The input text is in Japanese. Look for Japanese PII formats (マイナンバー, Japanese phone numbers, addresses).",
+    "ru": "The input text is in Russian. Look for Russian PII formats (ИНН, СНИЛС, Russian passport, phone numbers, addresses).",
+    "ko": "The input text is in Korean. Look for Korean PII formats (주민등록번호/RRN, Korean phone numbers, addresses).",
+    "it": "The input text is in Italian. Look for Italian PII formats (Codice Fiscale, IBAN IT, Italian phone numbers, addresses).",
+    "pl": "The input text is in Polish. Look for Polish PII formats (PESEL, NIP, IBAN PL, Polish phone numbers, addresses).",
+    "pt": "The input text is in Portuguese. Look for Portuguese/Brazilian PII formats (CPF, NIF, IBAN PT, phone numbers, addresses).",
+    "hi": "The input text is in Hindi. Look for Indian PII formats (Aadhaar, PAN card, Indian phone numbers, addresses).",
+}
 
 
 class LlmDetector:
@@ -69,9 +145,13 @@ class LlmDetector:
 
     def __init__(self, config: ShieldConfig):
         self._model = config.llm_model
-        self._base_url = config.llm_ollama_url.rstrip("/")
+        self._base_url = _validate_ollama_url(
+            config.llm_ollama_url.rstrip("/"),
+            getattr(config, 'llm_allow_remote', False),
+        )
         self._timeout = config.llm_timeout
         self._confidence = config.llm_confidence
+        self._locale = getattr(config, 'locale', 'en')
         self._available: bool | None = None  # None = not checked yet
         self._cache = _BoundedCache(maxsize=getattr(config, 'llm_cache_maxsize', 1024))
         # Custom LLM categories
@@ -81,6 +161,11 @@ class LlmDetector:
                 logger.warning("Custom LLM category '%s' conflicts with excluded category — skipped", name)
                 continue
             self._custom_categories[name] = desc
+
+    @staticmethod
+    def _cache_key(text: str) -> str:
+        """Hash text for cache key to avoid storing raw PII."""
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     @property
     def _effective_categories(self) -> frozenset[str]:
@@ -119,6 +204,10 @@ class LlmDetector:
             prompt += "\nCategory hints:"
             for name, desc in sorted(hints):
                 prompt += f"\n- {name}: {desc}"
+        # Append locale hint if available
+        locale_hint = _LOCALE_HINTS.get(self._locale)
+        if locale_hint:
+            prompt += f"\n{locale_hint}"
         return prompt
 
     def _build_prompt(self, text: str) -> str:
@@ -174,12 +263,12 @@ class LlmDetector:
             return []
 
         # Check cache
-        cached = self._cache.get(text)
+        cached = self._cache.get(self._cache_key(text))
         if cached is not None:
             entities = cached.entities
         else:
             entities = self._query_ollama(text)
-            self._cache.set(text, _CachedResult(entities=entities))
+            self._cache.set(self._cache_key(text), _CachedResult(entities=entities))
 
         # Sort by value length desc (longer matches first)
         entities.sort(key=lambda e: len(e.get("value", "")), reverse=True)

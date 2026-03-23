@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -66,6 +67,7 @@ class AuditLogger:
         self._log_dir = config.log_dir
         self._current_file: Optional[Path] = None
         self._initialized = False
+        self._lock = threading.Lock()
 
     def _ensure_init(self):
         """Initialize log directory and recover chain state from existing logs."""
@@ -97,6 +99,29 @@ class AuditLogger:
         """Get today's log file path."""
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         return self._log_dir / f"audit_{today}.jsonl"
+
+    def _write_with_lock(self, log_file: Path, data: str) -> None:
+        """Write to audit log with cross-process file locking."""
+        import sys
+        with open(log_file, "a") as f:
+            if sys.platform == "win32":
+                import msvcrt
+                try:
+                    msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+                    f.write(data)
+                finally:
+                    try:
+                        f.seek(0, 2)
+                        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                    except OSError:
+                        pass
+            else:
+                import fcntl
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                try:
+                    f.write(data)
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
     @staticmethod
     def _compute_hash(data: dict) -> str:
@@ -131,53 +156,54 @@ class AuditLogger:
         if not self.config.audit_enabled:
             return None
 
-        self._ensure_init()
+        with self._lock:
+            self._ensure_init()
 
-        # Build entry data (without entry_hash — we compute that last)
-        entry_data = {
-            "seq": self._seq,
-            "event_id": str(uuid.uuid4()),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "event_type": event_type,
-            "model": model,
-            "provider": provider,
-            "entity_count": entity_count,
-            "categories": categories or {},
-            "tokens_used": tokens_used or [],
-            "prompt_hash": hashlib.sha256(original_text.encode()).hexdigest() if original_text else "",
-            "sanitized_hash": hashlib.sha256(sanitized_text.encode()).hexdigest() if sanitized_text else "",
-            "latency_ms": round(latency_ms, 2),
-            "mode": mode,
-            "entity_details": entity_details or [],
-            "timing": timing,
-            "certificate_hash": certificate_hash,
-            "key_id": key_id,
-            "prev_hash": self._prev_hash,
-            "metadata": metadata or {},
-        }
+            # Build entry data (without entry_hash — we compute that last)
+            entry_data = {
+                "seq": self._seq,
+                "event_id": str(uuid.uuid4()),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "event_type": event_type,
+                "model": model,
+                "provider": provider,
+                "entity_count": entity_count,
+                "categories": categories or {},
+                "tokens_used": tokens_used or [],
+                "prompt_hash": hashlib.sha256(original_text.encode()).hexdigest() if original_text else "",
+                "sanitized_hash": hashlib.sha256(sanitized_text.encode()).hexdigest() if sanitized_text else "",
+                "latency_ms": round(latency_ms, 2),
+                "mode": mode,
+                "entity_details": entity_details or [],
+                "timing": timing,
+                "certificate_hash": certificate_hash,
+                "key_id": key_id,
+                "prev_hash": self._prev_hash,
+                "metadata": metadata or {},
+            }
 
-        # Compute entry hash (includes prev_hash for chain integrity)
-        entry_hash = self._compute_hash(entry_data)
-        entry_data["entry_hash"] = entry_hash
+            # Compute entry hash (includes prev_hash for chain integrity)
+            entry_hash = self._compute_hash(entry_data)
+            entry_data["entry_hash"] = entry_hash
 
-        # Write to log file
-        log_file = self._get_log_file()
-        with open(log_file, "a") as f:
-            f.write(json.dumps(entry_data, separators=(",", ":")) + "\n")
+            # Write to log file
+            log_file = self._get_log_file()
+            self._write_with_lock(log_file, json.dumps(entry_data, separators=(",", ":")) + "\n")
 
-        # Update chain state
-        self._prev_hash = entry_hash
-        self._seq += 1
+            # Update chain state
+            self._prev_hash = entry_hash
+            self._seq += 1
 
-        return AuditEntry(**entry_data)
+            return AuditEntry(**entry_data)
 
-    def verify_chain(self, log_file: Optional[Path] = None) -> tuple[bool, list[str]]:
+    def verify_chain(self, log_file: Optional[Path] = None) -> tuple[bool, list[str], int]:
         """
         Verify the integrity of the entire audit chain.
 
-        Returns (is_valid, list_of_errors).
+        Returns (is_valid, list_of_errors, final_seq).
         """
         errors: list[str] = []
+        final_seq = 0
 
         if log_file:
             files = [log_file]
@@ -185,7 +211,7 @@ class AuditLogger:
             files = sorted(self._log_dir.glob("audit_*.jsonl"))
 
         if not files:
-            return True, []
+            return True, [], 0
 
         prev_hash = GENESIS_HASH
 
@@ -201,6 +227,11 @@ class AuditLogger:
                     except json.JSONDecodeError:
                         errors.append(f"{fpath.name}:{line_num} — Invalid JSON")
                         continue
+
+                    # Track the last seq number seen
+                    entry_seq = entry.get("seq", 0)
+                    if entry_seq >= final_seq:
+                        final_seq = entry_seq
 
                     # Check chain link
                     if entry.get("prev_hash") != prev_hash:
@@ -222,7 +253,7 @@ class AuditLogger:
 
                     prev_hash = stored_hash
 
-        return len(errors) == 0, errors
+        return len(errors) == 0, errors, final_seq
 
     def get_stats(self) -> dict:
         """Get aggregate statistics from audit logs."""

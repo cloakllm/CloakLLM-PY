@@ -34,8 +34,10 @@ def cmd_scan(args):
     if text == "-":
         text = sys.stdin.read()
 
+    show_pii = getattr(args, "show_pii", False)
+
     # Analyze
-    analysis = shield.analyze(text)
+    analysis = shield.analyze(text, redact_values=not show_pii)
 
     if not analysis["entities"]:
         print("✅ No sensitive entities detected.")
@@ -44,19 +46,24 @@ def cmd_scan(args):
     print(f"⚠️  Found {analysis['entity_count']} sensitive entities:\n")
 
     for ent in analysis["entities"]:
-        print(f"  [{ent['category']}] \"{ent['text']}\"")
+        display = ent['text'] if show_pii else "***"
+        print(f"  [{ent['category']}] \"{display}\"")
         print(f"    Position: {ent['start']}-{ent['end']} | "
               f"Confidence: {ent['confidence']:.0%} | Source: {ent['source']}")
 
     # Show sanitized version
     sanitized, token_map = shield.sanitize(text)
     print(f"\n{'─' * 60}")
-    print(f"ORIGINAL:  {text}")
+    if show_pii:
+        print(f"ORIGINAL:  {text}")
+    else:
+        print(f"ORIGINAL:  [use --show-pii to display]")
     print(f"SANITIZED: {sanitized}")
     print(f"{'─' * 60}")
     print(f"\nToken map ({token_map.entity_count} entities):")
     for token, original in token_map.reverse.items():
-        print(f"  {token} → \"{original}\"")
+        display = original if show_pii else "***"
+        print(f"  {token} → \"{display}\"")
 
 
 def cmd_verify(args):
@@ -74,7 +81,7 @@ def cmd_verify(args):
     logger = AuditLogger(config)
 
     print(f"Verifying audit chain in {log_dir}...")
-    is_valid, errors = logger.verify_chain()
+    is_valid, errors, final_seq = logger.verify_chain()
 
     if is_valid:
         print("✅ Audit chain integrity verified — no tampering detected.")
@@ -109,6 +116,8 @@ def main():
     # scan
     scan_parser = subparsers.add_parser("scan", help="Scan text for sensitive data")
     scan_parser.add_argument("text", help="Text to scan (use '-' for stdin)")
+    scan_parser.add_argument("--show-pii", action="store_true", default=False,
+                             help="Show raw PII values (default: redacted)")
 
     # verify
     verify_parser = subparsers.add_parser("verify", help="Verify audit log integrity")

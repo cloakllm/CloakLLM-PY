@@ -17,10 +17,14 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger("cloakllm.attestation")
 
 # --- Optional Ed25519 backends ---
 
@@ -141,7 +145,12 @@ class DeploymentKeyPair:
         try:
             path.chmod(0o600)
         except OSError:
-            pass  # Windows doesn't support Unix permissions
+            import platform
+            if platform.system() == "Windows":
+                logger.warning(
+                    "Cannot set restrictive file permissions on Windows for '%s'. "
+                    "Ensure the file is protected by NTFS ACLs.", path
+                )
 
     @classmethod
     def from_file(cls, path: Path | str) -> DeploymentKeyPair:
@@ -167,6 +176,7 @@ _SIGNED_FIELDS = [
     "detection_passes",
     "mode",
     "key_id",
+    "nonce",
 ]
 
 
@@ -183,6 +193,7 @@ class SanitizationCertificate:
     detection_passes: list[str] = field(default_factory=list)
     mode: str = "tokenize"
     key_id: str = ""
+    nonce: str = ""
     signature: str = ""          # NOT included in signed payload
     public_key: str = ""         # NOT included in signed payload
 
@@ -191,7 +202,7 @@ class SanitizationCertificate:
         return {k: getattr(self, k) for k in _SIGNED_FIELDS}
 
     def to_dict(self) -> dict:
-        """Return all fields as a dict (including signature and public_key)."""
+        """Return all fields as a dict (including signature, public_key, and nonce)."""
         d = self._signed_payload()
         d["signature"] = self.signature
         d["public_key"] = self.public_key
@@ -238,6 +249,7 @@ class SanitizationCertificate:
             detection_passes=list(detection_passes),
             mode=mode,
             key_id=keypair.key_id,
+            nonce=str(uuid.uuid4()),
         )
         payload = _canonical_json(cert._signed_payload())
         cert.signature = keypair.sign_b64(payload.encode("utf-8"))
@@ -264,6 +276,7 @@ class SanitizationCertificate:
             detection_passes=d.get("detection_passes", []),
             mode=d.get("mode", "tokenize"),
             key_id=d.get("key_id", ""),
+            nonce=d.get("nonce", ""),
             signature=d.get("signature", ""),
             public_key=d.get("public_key", ""),
         )
@@ -272,7 +285,13 @@ class SanitizationCertificate:
 # --- MerkleTree ---
 
 class MerkleTree:
-    """Binary Merkle tree for batch attestation."""
+    """Binary Merkle tree for batch attestation.
+
+    Builds a bottom-up SHA-256 hash tree from a list of leaf hashes.
+    When a tree level has an odd number of nodes, the last node is
+    promoted to the next level without hashing (odd-leaf promotion).
+    This avoids duplicating leaves and keeps proofs compact.
+    """
 
     def __init__(self, leaves: list[str]):
         if not leaves:

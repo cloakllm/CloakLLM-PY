@@ -94,7 +94,6 @@ def config(tmp_path):
     return ShieldConfig(
         log_dir=tmp_path / "audit",
         audit_enabled=True,
-        log_original_values=False,
     )
 
 

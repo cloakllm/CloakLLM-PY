@@ -6,7 +6,7 @@ the entire response. Emits text as soon as it's safe to do so.
 """
 
 from __future__ import annotations
-from cloakllm.tokenizer import TokenMap
+from cloakllm.tokenizer import TokenMap, _ESCAPED_PATTERN
 
 _MAX_TOKEN_LEN = 40
 
@@ -32,6 +32,11 @@ class StreamDesanitizer:
         self._reverse_ci: dict[str, str] = {
             k.lower(): v for k, v in token_map.reverse.items()
         }
+
+    @staticmethod
+    def _unescape(text: str) -> str:
+        """Restore fullwidth brackets back to ASCII brackets."""
+        return _ESCAPED_PATTERN.sub(lambda m: f"[{m.group(1)}]", text)
 
     def feed(self, chunk: str) -> str:
         """Feed a chunk of text through the desanitizer.
@@ -73,7 +78,7 @@ class StreamDesanitizer:
                     output_parts.append(candidate)
                     self._buffer = self._buffer[close_pos + 1:]
 
-        return "".join(output_parts)
+        return self._unescape("".join(output_parts))
 
     def flush(self) -> str:
         """Flush any remaining buffered text.
@@ -82,4 +87,4 @@ class StreamDesanitizer:
         """
         remaining = self._buffer
         self._buffer = ""
-        return remaining
+        return self._unescape(remaining)

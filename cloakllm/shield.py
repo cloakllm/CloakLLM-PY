@@ -468,19 +468,20 @@ class Shield:
 
         return result
 
-    def analyze(self, text: str) -> dict:
+    def analyze(self, text: str, redact_values: bool = False) -> dict:
         """
         Analyze text for sensitive data without modifying it.
-        Useful for previewing what would be detected.
 
-        Returns a summary dict.
+        WARNING: By default, the return value contains raw PII in the 'text'
+        field of each entity. Set redact_values=True to replace with '[redacted]'.
+        Never log or transmit the output of this method without redaction.
         """
         detections, _ = self.detector.detect(text)
         return {
             "entity_count": len(detections),
             "entities": [
                 {
-                    "text": d.text,
+                    "text": "[redacted]" if redact_values else d.text,
                     "category": d.category,
                     "start": d.start,
                     "end": d.end,
@@ -510,9 +511,13 @@ class Shield:
         with self._metrics_lock:
             self._metrics = self._empty_metrics()
 
-    def verify_audit(self) -> tuple[bool, list[str]]:
-        """Verify the integrity of all audit logs."""
-        return self.audit.verify_chain()
+    def verify_audit(self) -> dict:
+        """Verify the integrity of all audit logs.
+
+        Returns a dict with 'valid' (bool), 'errors' (list[str]), and 'final_seq' (int).
+        """
+        is_valid, errors, final_seq = self.audit.verify_chain()
+        return {"valid": is_valid, "errors": errors, "final_seq": final_seq}
 
     def audit_stats(self) -> dict:
         """Get aggregate audit statistics."""

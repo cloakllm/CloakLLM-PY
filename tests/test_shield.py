@@ -40,7 +40,6 @@ def config(tmp_path):
     return ShieldConfig(
         log_dir=tmp_path / "audit",
         audit_enabled=True,
-        log_original_values=False,
     )
 
 
@@ -225,7 +224,7 @@ class TestAuditChain:
         audit_logger.log(event_type="event_2")
         audit_logger.log(event_type="event_3")
 
-        is_valid, errors = audit_logger.verify_chain()
+        is_valid, errors, _final_seq = audit_logger.verify_chain()
         assert is_valid, f"Chain errors: {errors}"
 
     def test_audit_first_entry_links_to_genesis(self, audit_logger, config):
@@ -258,7 +257,7 @@ class TestAuditChain:
             f.writelines(lines)
 
         # Verification should catch it
-        is_valid, errors = audit_logger.verify_chain()
+        is_valid, errors, _final_seq = audit_logger.verify_chain()
         assert not is_valid
         assert len(errors) >= 1
 
@@ -271,7 +270,7 @@ class TestAuditChain:
         assert stats["total_entities_detected"] >= 2
 
     def test_audit_no_original_values_logged(self, shield, config):
-        """When log_original_values=False, originals should not appear in log."""
+        """Originals should not appear in log (PII never logged by default)."""
         shield.sanitize("Email john@acme.com")
 
         log_file = list(config.log_dir.glob("audit_*.jsonl"))[0]
@@ -321,7 +320,8 @@ class TestEndToEnd:
         assert "[IP_ADDRESS_0]" not in restored
 
         # Verify audit chain
-        is_valid, errors = shield.verify_audit()
+        _audit_result = shield.verify_audit()
+        is_valid, errors = _audit_result["valid"], _audit_result["errors"]
         assert is_valid
 
     def test_analyze_mode(self, shield):
@@ -822,7 +822,8 @@ class TestEntityDetails:
         shield.sanitize("Email john@acme.com")
         shield.sanitize("SSN 123-45-6789")
         shield.sanitize("No PII here")
-        is_valid, errors = shield.verify_audit()
+        _audit_result = shield.verify_audit()
+        is_valid, errors = _audit_result["valid"], _audit_result["errors"]
         assert is_valid, f"Chain errors: {errors}"
 
 
@@ -923,7 +924,8 @@ class TestBatch:
         shield.sanitize("Email john@acme.com")
         shield.sanitize_batch(["SSN 123-45-6789", "Phone 555-123-4567"])
         shield.desanitize_batch(["test"], TokenMap())
-        is_valid, errors = shield.verify_audit()
+        _audit_result = shield.verify_audit()
+        is_valid, errors = _audit_result["valid"], _audit_result["errors"]
         assert is_valid, f"Chain errors: {errors}"
 
 
@@ -1025,7 +1027,8 @@ class TestMetrics:
         shield.sanitize("SSN 123-45-6789")
         _, token_map = shield.sanitize("Phone 555-123-4567")
         shield.desanitize("[PHONE_0]", token_map)
-        is_valid, errors = shield.verify_audit()
+        _audit_result = shield.verify_audit()
+        is_valid, errors = _audit_result["valid"], _audit_result["errors"]
         assert is_valid, f"Chain errors: {errors}"
 
 
@@ -1179,7 +1182,8 @@ class TestEntityHashing:
         shield = Shield(config)
         shield.sanitize("Contact john@acme.com")
         shield.sanitize("Call +1-555-0142")
-        valid, errors = shield.verify_audit()
+        _audit_result = shield.verify_audit()
+        valid, errors = _audit_result["valid"], _audit_result["errors"]
         assert valid, f"Audit chain errors: {errors}"
 
     def test_hash_batch_includes_hash(self, tmp_path):
@@ -1388,7 +1392,8 @@ class TestAttestationIntegration:
         shield.sanitize("Email john@acme.com")
         shield.sanitize("Call 555-123-4567")
         shield.sanitize_batch(["test1", "test2"])
-        valid, errors = shield.verify_audit()
+        _audit_result = shield.verify_audit()
+        valid, errors = _audit_result["valid"], _audit_result["errors"]
         assert valid is True, f"Audit chain broken: {errors}"
 
     def test_attestation_key_from_file(self, keypair, tmp_path):

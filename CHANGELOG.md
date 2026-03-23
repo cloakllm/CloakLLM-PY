@@ -5,6 +5,33 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-03-23
+
+### Added
+
+- **Multi-language PII detection** — 13 locales with locale-specific regex patterns
+  - Supported locales: `de`, `fr`, `es`, `it`, `pt`, `nl`, `pl`, `se`, `no`, `dk`, `fi`, `gb`, `au`
+  - Locale-specific patterns for SSN, phone, IBAN, tax IDs, national ID numbers
+  - Auto-selection of spaCy NER model per locale (`_NER_LABEL_MAP`)
+  - New `locale` config option in `ShieldConfig`
+- `analyze(redact_values=True)` option to mask PII values in analysis output
+- Replay-resistant attestation certificates with UUID4 `nonce` field
+- `verify_audit()` now returns `final_seq` for truncation detection
+- Cross-process file locking for audit log writes (fcntl/msvcrt)
+- Thread-safe `TokenMap.get_or_create()`, `AuditLogger.log()`, `_BoundedCache`
+
+### Security
+
+- **Ollama SSRF prevention** — URL validation restricts to localhost/private IPs by default (`llm_allow_remote` opt-in)
+- **LLM cache PII protection** — cache keys hashed with SHA-256 instead of raw text
+- **CLI PII protection** — `--show-pii` flag required to display raw PII values (redacted by default)
+- **StreamDesanitizer** now unescapes fullwidth brackets on output
+- **ReDoS hardening** — 5 adversarial test inputs, 20ms threshold, built-in patterns tested at construction
+- **Token pattern** extended to match `[CATEGORY_REDACTED]` tokens for consistent handling
+- Removed unused `log_original_values` config option
+- Path traversal warnings for `log_dir` and `attestation_key_path` outside CWD
+- Windows permission warning in `DeploymentKeyPair.save()`
+
 ## [0.3.2] - 2026-03-15
 
 ### Added

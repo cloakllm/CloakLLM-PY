@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import warnings
 
 from cloakllm.config import ShieldConfig
+from cloakllm.locale_patterns import LOCALE_PATTERNS
 
 ALLOWED_SPACY_MODELS = frozenset({
     "en_core_web_sm", "en_core_web_md", "en_core_web_lg", "en_core_web_trf",
@@ -21,9 +22,38 @@ ALLOWED_SPACY_MODELS = frozenset({
     "de_core_news_sm", "de_core_news_md", "de_core_news_lg",
     "fr_core_news_sm", "fr_core_news_md", "fr_core_news_lg",
     "es_core_news_sm", "es_core_news_md", "es_core_news_lg",
-    "he_core_news_sm", "he_core_news_md", "he_core_news_lg",
+    "nl_core_news_sm", "nl_core_news_md", "nl_core_news_lg",
     "zh_core_web_sm", "zh_core_web_md", "zh_core_web_lg", "zh_core_web_trf",
+    "ja_core_news_sm", "ja_core_news_md", "ja_core_news_lg",
+    "ru_core_news_sm", "ru_core_news_md", "ru_core_news_lg",
+    "ko_core_news_sm", "ko_core_news_md", "ko_core_news_lg",
+    "it_core_news_sm", "it_core_news_md", "it_core_news_lg",
+    "pl_core_news_sm", "pl_core_news_md", "pl_core_news_lg",
+    "pt_core_news_sm", "pt_core_news_md", "pt_core_news_lg",
 })
+
+# Map raw NER labels from different label schemes to CloakLLM canonical categories
+_NER_LABEL_MAP = {
+    # OntoNotes labels pass through (en, nl, zh, ja)
+    "PERSON": "PERSON",
+    "ORG": "ORG",
+    "GPE": "GPE",
+    "FAC": "FAC",
+    "NORP": "NORP",
+    "LOC": "GPE",       # Both WikiNER LOC and OntoNotes LOC → GPE
+    # WikiNER (de, fr, es, it, pt, ru)
+    "PER": "PERSON",
+    "MISC": "MISC",
+    # Korean (KLUE)
+    "PS": "PERSON",
+    "LC": "GPE",
+    "OG": "ORG",
+    # Polish (NKJP corpus)
+    "persName": "PERSON",
+    "placeName": "GPE",
+    "geogName": "GPE",
+    "orgName": "ORG",
+}
 
 
 @dataclass(frozen=True)
@@ -112,11 +142,19 @@ class DetectionEngine:
     @staticmethod
     def _test_regex_safety(regex: re.Pattern) -> bool:
         """Test if a regex is safe from catastrophic backtracking."""
-        import time
-        test_input = 'a' * 25 + '!'
-        start = time.monotonic()
-        regex.search(test_input)
-        return (time.monotonic() - start) < 0.05
+        test_inputs = [
+            'a' * 25 + '!',
+            '1' * 25 + '!',
+            ' ' * 25 + '!',
+            ('a1 ' * 8) + '!',
+            '@' * 25 + '!',
+        ]
+        for test_input in test_inputs:
+            start = time.monotonic()
+            regex.search(test_input)
+            if (time.monotonic() - start) >= 0.02:
+                return False
+        return True
 
     def _build_patterns(self):
         """Compile regex patterns based on config."""
@@ -153,11 +191,31 @@ class DetectionEngine:
                     stacklevel=2,
                 )
 
-        # Built-in patterns second
+        # Locale patterns second — before built-in so locale-specific patterns
+        # (e.g., PHONE_DE) take priority over universal patterns (e.g., PHONE)
+        # via covered-span overlap checks.
+        locale = getattr(self.config, 'locale', 'en')
+        for category, _hint, pattern_str in LOCALE_PATTERNS.get(locale, []):
+            try:
+                compiled = re.compile(pattern_str)
+                if self._test_regex_safety(compiled):
+                    self._compiled_patterns.append((category, compiled))
+            except re.error:
+                pass
+
+        # Built-in patterns third
         for name, (_, pattern) in PATTERNS.items():
             if pattern_map.get(name, True):
                 self._compiled_patterns.append(
                     (name, re.compile(pattern))
+                )
+
+        # Safety-check all patterns (including built-in)
+        for name, pattern in self._compiled_patterns:
+            if not self._test_regex_safety(pattern):
+                warnings.warn(
+                    f"CloakLLM: Pattern '{name}' failed ReDoS safety check — this is a bug",
+                    RuntimeWarning, stacklevel=2,
                 )
 
     @property
@@ -245,6 +303,8 @@ class DetectionEngine:
         for ent in doc.ents:
             if ent.label_ not in self.config.ner_entity_types:
                 continue
+            # Map raw NER label to canonical CloakLLM category
+            mapped_label = _NER_LABEL_MAP.get(ent.label_, ent.label_)
             start, end = ent.start_char, ent.end_char
             # Skip if already detected by regex
             if any(start < e and end > s for s, e in covered_spans):
@@ -254,7 +314,7 @@ class DetectionEngine:
                 continue
             detections.append(Detection(
                 text=ent.text,
-                category=ent.label_,
+                category=mapped_label,
                 start=start,
                 end=end,
                 confidence=0.85,

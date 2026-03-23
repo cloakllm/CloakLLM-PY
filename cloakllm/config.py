@@ -18,9 +18,33 @@ from pathlib import Path
 from typing import Any, Optional
 
 
+_LOCALE_MODELS = {
+    "en": "en_core_web_sm",
+    "de": "de_core_news_sm",
+    "fr": "fr_core_news_sm",
+    "es": "es_core_news_sm",
+    "nl": "nl_core_news_sm",       # OntoNotes labels (PERSON, ORG, GPE, etc.)
+    "zh": "zh_core_web_sm",        # OntoNotes labels
+    "ja": "ja_core_news_sm",       # OntoNotes labels + Japanese-specific
+    "ru": "ru_core_news_sm",       # WikiNER labels (PER, LOC, ORG — no MISC)
+    "ko": "ko_core_news_sm",       # KLUE labels (PS, LC, OG, DT, QT, TI)
+    "it": "it_core_news_sm",       # WikiNER labels (PER, LOC, ORG, MISC)
+    "pl": "pl_core_news_sm",       # NKJP labels (persName, placeName, orgName, geogName)
+    "pt": "pt_core_news_sm",       # WikiNER labels (PER, LOC, ORG, MISC)
+    # "he" — no official spaCy model; uses regex + Ollama LLM only
+    # "hi" — no official spaCy model; uses regex + Ollama LLM only
+    "multi": "xx_ent_wiki_sm",     # WikiNER labels (PER, LOC, ORG, MISC)
+}
+
+
 @dataclass
 class ShieldConfig:
     """Configuration for CloakLLM."""
+
+    # --- Locale ---
+    locale: str = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_LOCALE", "en")
+    )  # Language/locale code: en, de, fr, es, nl, he, zh, ja, ru, ko, it, pl, pt, hi, multi
 
     # --- Detection ---
     spacy_model: str = field(
@@ -28,7 +52,18 @@ class ShieldConfig:
     )
     # Entity types to detect via spaCy NER
     ner_entity_types: set[str] = field(
-        default_factory=lambda: {"PERSON", "ORG", "GPE", "LOC", "FAC", "NORP", "EMAIL", "PHONE"}
+        default_factory=lambda: {
+            # OntoNotes (en, nl, zh, ja)
+            "PERSON", "ORG", "GPE", "LOC", "FAC", "NORP",
+            # WikiNER (de, fr, es, it, pt, ru)
+            "PER", "MISC",
+            # KLUE (ko)
+            "PS", "LC", "OG",
+            # NKJP (pl)
+            "persName", "placeName", "orgName", "geogName",
+            # Regex-covered (pass-through)
+            "EMAIL", "PHONE",
+        }
     )
     # Enable/disable regex-based detection
     detect_emails: bool = True
@@ -55,6 +90,9 @@ class ShieldConfig:
     )
     llm_timeout: float = 10.0
     llm_confidence: float = 0.85
+    llm_allow_remote: bool = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_LLM_ALLOW_REMOTE", "false").lower() == "true"
+    )
 
     # --- Tokenization ---
     # Mode: "tokenize" (reversible tokens) or "redact" (irreversible [CATEGORY_REDACTED])
@@ -77,9 +115,6 @@ class ShieldConfig:
     log_dir: Path = field(
         default_factory=lambda: Path(os.getenv("CLOAKLLM_LOG_DIR", "./cloakllm_audit"))
     )
-    # Log original values (set False for maximum privacy - only hashes logged)
-    log_original_values: bool = False
-
     # --- OpenTelemetry ---
     otel_enabled: bool = field(
         default_factory=lambda: os.getenv("CLOAKLLM_OTEL_ENABLED", "false").lower() == "true"
@@ -112,4 +147,37 @@ class ShieldConfig:
                 raise ValueError(
                     f"Invalid custom LLM category name '{name}'. "
                     "Must match ^[A-Z][A-Z0-9_]*$"
+                )
+
+        # Auto-select spaCy model if locale != en and user didn't explicitly override.
+        # Note: This checks if spacy_model still equals the default "en_core_web_sm".
+        # If a user explicitly passes spacy_model="en_core_web_sm" AND locale="de",
+        # the German model will be auto-selected (because we can't distinguish
+        # "user passed the default" from "user didn't pass anything"). This is the
+        # desired behavior — the locale should drive model selection unless a
+        # non-English model is explicitly specified.
+        if self.locale != "en" and self.spacy_model == "en_core_web_sm":
+            model = _LOCALE_MODELS.get(self.locale)
+            if model:
+                self.spacy_model = model
+
+        # Path validation
+        import warnings as _warnings
+        _resolved_log = self.log_dir.resolve()
+        _cwd = Path.cwd().resolve()
+        try:
+            _resolved_log.relative_to(_cwd)
+        except ValueError:
+            _warnings.warn(
+                f"CloakLLM: log_dir '{_resolved_log}' is outside the current working directory.",
+                RuntimeWarning, stacklevel=2,
+            )
+        if self.attestation_key_path:
+            _resolved_key = Path(self.attestation_key_path).resolve()
+            try:
+                _resolved_key.relative_to(_cwd)
+            except ValueError:
+                _warnings.warn(
+                    f"CloakLLM: attestation_key_path '{_resolved_key}' is outside the current working directory.",
+                    RuntimeWarning, stacklevel=2,
                 )

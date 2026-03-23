@@ -176,7 +176,7 @@ class TestSanitizationCertificate:
         expected_fields = {
             "version", "timestamp", "input_hash", "output_hash",
             "entity_count", "categories", "detection_passes", "mode",
-            "key_id", "signature", "public_key",
+            "key_id", "signature", "public_key", "nonce",
         }
         assert set(d.keys()) == expected_fields
 

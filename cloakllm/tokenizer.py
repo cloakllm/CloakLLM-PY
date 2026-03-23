@@ -11,17 +11,18 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from cloakllm.config import ShieldConfig
 from cloakllm.detector import Detection
 
-_TOKEN_PATTERN = re.compile(r"\[([A-Z_]+_\d+)\]")
+_TOKEN_PATTERN = re.compile(r"\[([A-Z_]+_(?:\d+|REDACTED))\]")
 _ESCAPED_OPEN = "\uFF3B"
 _ESCAPED_CLOSE = "\uFF3D"
 _ESCAPED_PATTERN = re.compile(
-    rf"{re.escape(_ESCAPED_OPEN)}([A-Z_]+_\d+){re.escape(_ESCAPED_CLOSE)}"
+    rf"{re.escape(_ESCAPED_OPEN)}([A-Z_]+_(?:\d+|REDACTED)){re.escape(_ESCAPED_CLOSE)}"
 )
 
 
@@ -49,6 +50,9 @@ class TokenMap:
     batch_certificate: Optional[Any] = None
     merkle_tree: Optional[Any] = None
 
+    def __post_init__(self):
+        self._lock = threading.Lock()
+
     def _compute_entity_hash(self, category: str, original_text: str) -> str:
         """Compute HMAC-SHA256 hash for an entity: HMAC(key, "CATEGORY:normalized")."""
         normalized = original_text.strip().lower()
@@ -64,19 +68,20 @@ class TokenMap:
         if self.mode == "redact":
             return f"[{category}_REDACTED]"
 
-        # Normalize: strip whitespace for consistent matching
-        key = original.strip()
-        if key in self.forward:
-            return self.forward[key]
+        with self._lock:
+            # Normalize: strip whitespace for consistent matching
+            key = original.strip()
+            if key in self.forward:
+                return self.forward[key]
 
-        # Create new token
-        idx = self._counters.get(category, 0)
-        self._counters[category] = idx + 1
-        token = f"[{category}_{idx}]"
+            # Create new token
+            idx = self._counters.get(category, 0)
+            self._counters[category] = idx + 1
+            token = f"[{category}_{idx}]"
 
-        self.forward[key] = token
-        self.reverse[token] = key
-        return token
+            self.forward[key] = token
+            self.reverse[token] = key
+            return token
 
     @property
     def entity_count(self) -> int:
