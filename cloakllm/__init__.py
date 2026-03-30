@@ -19,7 +19,7 @@ Standalone usage:
     # sanitized: "Send email to [EMAIL_0] about [ORG_0]"
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 from cloakllm.shield import Shield
 from cloakllm.config import ShieldConfig
@@ -35,6 +35,7 @@ from cloakllm.attestation import (
     MerkleTree,
     derive_entity_hash_key,
 )
+from cloakllm.context_analyzer import ContextAnalyzer, RiskAssessment
 
 __all__ = [
     "Shield",
@@ -50,4 +51,6 @@ __all__ = [
     "SanitizationCertificate",
     "MerkleTree",
     "derive_entity_hash_key",
+    "ContextAnalyzer",
+    "RiskAssessment",
 ]

@@ -94,6 +94,12 @@ class ShieldConfig:
         default_factory=lambda: os.getenv("CLOAKLLM_LLM_ALLOW_REMOTE", "false").lower() == "true"
     )
 
+    # --- Context Analysis ---
+    context_analysis: bool = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_CONTEXT_ANALYSIS", "false").lower() == "true"
+    )
+    context_risk_threshold: float = 0.7
+
     # --- Tokenization ---
     # Mode: "tokenize" (reversible tokens) or "redact" (irreversible [CATEGORY_REDACTED])
     mode: str = "tokenize"

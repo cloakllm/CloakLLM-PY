@@ -22,6 +22,7 @@ from cloakllm.attestation import (
     MerkleTree,
     SanitizationCertificate,
 )
+from cloakllm.context_analyzer import ContextAnalyzer
 
 
 class Shield:
@@ -61,6 +62,9 @@ class Shield:
             self._attestation_key = DeploymentKeyPair.from_file(
                 Path(self.config.attestation_key_path)
             )
+
+        # Context analyzer (opt-in)
+        self._context_analyzer = ContextAnalyzer() if self.config.context_analysis else None
 
     @staticmethod
     def _empty_metrics() -> dict[str, Any]:
@@ -175,6 +179,19 @@ class Shield:
             cert_hash = hashlib.sha256(cert.signature.encode()).hexdigest()
             cert_key_id = cert.key_id
 
+        # Context risk analysis (opt-in)
+        risk_assessment = None
+        if self._context_analyzer is not None:
+            import logging as _logging
+            risk = self._context_analyzer.analyze(sanitized)
+            risk_assessment = risk.to_dict()
+            token_map.risk_assessment = risk_assessment
+            if risk.risk_score > self.config.context_risk_threshold:
+                _logging.getLogger("cloakllm").warning(
+                    "Context risk %.2f (%s) exceeds threshold %.2f",
+                    risk.risk_score, risk.risk_level, self.config.context_risk_threshold,
+                )
+
         # Audit log
         self.audit.log(
             event_type="sanitize",
@@ -192,6 +209,7 @@ class Shield:
             metadata=metadata,
             certificate_hash=cert_hash,
             key_id=cert_key_id,
+            risk_assessment=risk_assessment,
         )
 
         return sanitized, token_map
@@ -491,6 +509,23 @@ class Shield:
                 for d in detections
             ],
         }
+
+    def analyze_context_risk(self, sanitized_text: str) -> dict:
+        """
+        Analyze sanitized text for context-based PII leakage risk.
+
+        This is a standalone method that can be called on any sanitized text,
+        regardless of the context_analysis config flag.
+
+        Args:
+            sanitized_text: Text containing [CATEGORY_N] tokens
+
+        Returns:
+            dict with token_density, identifying_descriptors, relationship_edges,
+            risk_score, risk_level, and warnings
+        """
+        analyzer = ContextAnalyzer()
+        return analyzer.analyze(sanitized_text).to_dict()
 
     def metrics(self) -> dict:
         """Return accumulated performance metrics for this Shield instance."""

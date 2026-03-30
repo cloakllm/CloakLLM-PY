@@ -65,6 +65,19 @@ def cmd_scan(args):
         display = original if show_pii else "***"
         print(f"  {token} → \"{display}\"")
 
+    # Context risk analysis (opt-in)
+    if getattr(args, "context_risk", False):
+        risk = shield.analyze_context_risk(sanitized)
+        print(f"\n{'─' * 60}")
+        print(f"CONTEXT RISK: {risk['risk_level'].upper()} (score: {risk['risk_score']:.3f})")
+        print(f"  Token density: {risk['token_density']:.3f}")
+        print(f"  Identifying descriptors: {risk['identifying_descriptors']}")
+        print(f"  Relationship edges: {risk['relationship_edges']}")
+        if risk["warnings"]:
+            print(f"  Warnings:")
+            for w in risk["warnings"]:
+                print(f"    • {w}")
+
 
 def cmd_verify(args):
     """Verify audit log chain integrity."""
@@ -118,6 +131,8 @@ def main():
     scan_parser.add_argument("text", help="Text to scan (use '-' for stdin)")
     scan_parser.add_argument("--show-pii", action="store_true", default=False,
                              help="Show raw PII values (default: redacted)")
+    scan_parser.add_argument("--context-risk", action="store_true", default=False,
+                             help="Analyze sanitized output for context-based PII leakage risk")
 
     # verify
     verify_parser = subparsers.add_parser("verify", help="Verify audit log integrity")

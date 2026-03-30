@@ -50,6 +50,7 @@ class AuditEntry:
     prev_hash: str              # Hash of previous entry (chain link)
     entry_hash: str             # Hash of this entry (computed from all fields + prev_hash)
     metadata: dict[str, Any]    # Additional context (user_id, session_id, etc.)
+    risk_assessment: Optional[dict]  # Context-based PII leakage risk (when context_analysis enabled)
 
 
 class AuditLogger:
@@ -147,6 +148,7 @@ class AuditLogger:
         metadata: Optional[dict[str, Any]] = None,
         certificate_hash: Optional[str] = None,
         key_id: Optional[str] = None,
+        risk_assessment: Optional[dict] = None,
     ) -> Optional[AuditEntry]:
         """
         Append a new entry to the audit log.
@@ -180,6 +182,7 @@ class AuditLogger:
                 "key_id": key_id,
                 "prev_hash": self._prev_hash,
                 "metadata": metadata or {},
+                "risk_assessment": risk_assessment,
             }
 
             # Compute entry hash (includes prev_hash for chain integrity)

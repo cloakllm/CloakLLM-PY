@@ -5,6 +5,21 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-03-30
+
+### Added
+
+- **Context-based PII leakage analysis** — new `ContextAnalyzer` module that scores re-identification risk in sanitized text
+  - Three heuristic signals: token density, identifying descriptors (CEO, founder, etc.), relationship edges (works at, lives in, etc.)
+  - `RiskAssessment` dataclass with `risk_score` (0–1), `risk_level` (low/medium/high), and `warnings`
+  - `shield.analyze_context_risk(sanitized_text)` — standalone analysis method
+  - `context_analysis` config flag for automatic analysis after `sanitize()`
+  - `context_risk_threshold` config option (default: 0.7) — emits warning when exceeded
+  - Risk assessment attached to `token_map.risk_assessment` when auto-analysis enabled
+  - Risk assessment included in audit log entries
+  - CLI `--context-risk` flag for `scan` command
+  - Exported `ContextAnalyzer` and `RiskAssessment` from top-level package
+
 ## [0.4.0] - 2026-03-23
 
 ### Added

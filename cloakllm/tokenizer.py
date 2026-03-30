@@ -49,6 +49,8 @@ class TokenMap:
     certificate: Optional[Any] = None
     batch_certificate: Optional[Any] = None
     merkle_tree: Optional[Any] = None
+    # Context risk assessment (set by Shield when context_analysis is enabled)
+    risk_assessment: Optional[dict] = None
 
     def __post_init__(self):
         self._lock = threading.Lock()
