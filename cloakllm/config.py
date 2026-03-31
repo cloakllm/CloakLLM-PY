@@ -147,12 +147,16 @@ class ShieldConfig:
         self.log_dir = Path(self.log_dir)
         if self.mode not in ("tokenize", "redact"):
             raise ValueError(f"Invalid mode '{self.mode}'. Must be 'tokenize' or 'redact'.")
-        import re as _re
+        from cloakllm.token_spec import validate_category_name, RESERVED_CATEGORIES
         for name, _desc in self.custom_llm_categories:
-            if not _re.match(r'^[A-Z][A-Z0-9_]*$', name):
+            if not validate_category_name(name):
                 raise ValueError(
                     f"Invalid custom LLM category name '{name}'. "
                     "Must match ^[A-Z][A-Z0-9_]*$"
+                )
+            if name in RESERVED_CATEGORIES:
+                raise ValueError(
+                    f"Custom LLM category '{name}' conflicts with built-in category."
                 )
 
         # Auto-select spaCy model if locale != en and user didn't explicitly override.

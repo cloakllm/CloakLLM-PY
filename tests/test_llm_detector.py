@@ -383,16 +383,13 @@ class TestCustomCategories:
         assert "CASE_NUMBER" in prompt
         assert "Category hints" not in prompt
 
-    def test_excluded_category_rejected_with_warning(self, caplog):
-        """Custom category colliding with EXCLUDED_CATEGORIES is skipped with warning."""
-        config = ShieldConfig(
-            llm_detection=True,
-            custom_llm_categories=[("EMAIL", "Custom email detection")],
-        )
-        with caplog.at_level(logging.WARNING, logger="cloakllm.llm_detector"):
-            detector = LlmDetector(config)
-        assert "EMAIL" not in detector._custom_categories
-        assert any("conflicts" in r.message for r in caplog.records)
+    def test_excluded_category_rejected_with_warning(self):
+        """Custom category colliding with built-in category is rejected at config level."""
+        with pytest.raises(ValueError, match="conflicts with built-in"):
+            ShieldConfig(
+                llm_detection=True,
+                custom_llm_categories=[("EMAIL", "Custom email detection")],
+            )
 
     def test_custom_and_builtin_coexist(self):
         """LLM returns both a built-in and a custom category — both accepted."""

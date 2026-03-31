@@ -5,6 +5,22 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-03-31
+
+### Added
+
+- **Normalized Token Standard** — formal specification for CloakLLM token format
+  - New `token_spec` module: canonical regex, category registry, validation utilities
+  - `validate_token()`, `parse_token()`, `is_redacted_token()`, `validate_category_name()`
+  - `BUILTIN_CATEGORIES`, `CLOAKLLM_TOKEN_PATTERN`, `MAX_TOKEN_LENGTH` constants
+  - All exported from top-level `cloakllm` package
+
+### Changed
+
+- Tokenizer and stream modules now import from `token_spec` (single source of truth)
+- Config validation now rejects custom LLM categories that collide with built-in names
+- Token regex updated from `[A-Z_]+` to `[A-Z][A-Z0-9_]*` (stricter, spec-conformant)
+
 ## [0.5.0] - 2026-03-30
 
 ### Added

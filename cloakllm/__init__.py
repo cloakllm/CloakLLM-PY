@@ -19,7 +19,7 @@ Standalone usage:
     # sanitized: "Send email to [EMAIL_0] about [ORG_0]"
 """
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 from cloakllm.shield import Shield
 from cloakllm.config import ShieldConfig
@@ -36,6 +36,15 @@ from cloakllm.attestation import (
     derive_entity_hash_key,
 )
 from cloakllm.context_analyzer import ContextAnalyzer, RiskAssessment
+from cloakllm.token_spec import (
+    validate_token,
+    parse_token,
+    validate_category_name,
+    is_redacted_token,
+    BUILTIN_CATEGORIES,
+    CLOAKLLM_TOKEN_PATTERN,
+    MAX_TOKEN_LENGTH,
+)
 
 __all__ = [
     "Shield",
@@ -53,4 +62,11 @@ __all__ = [
     "derive_entity_hash_key",
     "ContextAnalyzer",
     "RiskAssessment",
+    "validate_token",
+    "parse_token",
+    "validate_category_name",
+    "is_redacted_token",
+    "BUILTIN_CATEGORIES",
+    "CLOAKLLM_TOKEN_PATTERN",
+    "MAX_TOKEN_LENGTH",
 ]

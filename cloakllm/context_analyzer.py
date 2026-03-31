@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass
 
 
-TOKEN_RE = re.compile(r"\[[A-Z_]+_(?:\d+|REDACTED)\]", re.IGNORECASE)
+TOKEN_RE = re.compile(r"\[[A-Z][A-Z0-9_]*_(?:\d+|REDACTED)\]", re.IGNORECASE)
 
 IDENTIFYING_DESCRIPTORS = {
     "ceo", "president", "founder", "director", "chairman", "chairwoman",

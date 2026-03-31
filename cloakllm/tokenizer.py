@@ -17,12 +17,14 @@ from typing import Any, Optional
 
 from cloakllm.config import ShieldConfig
 from cloakllm.detector import Detection
+from cloakllm.token_spec import (
+    CLOAKLLM_TOKEN_REGEX as _TOKEN_PATTERN,
+    ESCAPED_OPEN as _ESCAPED_OPEN,
+    ESCAPED_CLOSE as _ESCAPED_CLOSE,
+)
 
-_TOKEN_PATTERN = re.compile(r"\[([A-Z_]+_(?:\d+|REDACTED))\]")
-_ESCAPED_OPEN = "\uFF3B"
-_ESCAPED_CLOSE = "\uFF3D"
 _ESCAPED_PATTERN = re.compile(
-    rf"{re.escape(_ESCAPED_OPEN)}([A-Z_]+_(?:\d+|REDACTED)){re.escape(_ESCAPED_CLOSE)}"
+    rf"{re.escape(_ESCAPED_OPEN)}([A-Z][A-Z0-9_]*_(?:\d+|REDACTED)){re.escape(_ESCAPED_CLOSE)}"
 )
 
 

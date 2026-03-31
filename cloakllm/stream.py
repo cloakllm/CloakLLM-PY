@@ -6,9 +6,8 @@ the entire response. Emits text as soon as it's safe to do so.
 """
 
 from __future__ import annotations
+from cloakllm.token_spec import MAX_TOKEN_LENGTH as _MAX_TOKEN_LEN
 from cloakllm.tokenizer import TokenMap, _ESCAPED_PATTERN
-
-_MAX_TOKEN_LEN = 40
 
 
 class StreamDesanitizer:
