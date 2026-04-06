@@ -1,8 +1,10 @@
 """
 PII Detection Engine.
 
-Combines spaCy NER with regex patterns for comprehensive sensitive data detection.
-Designed for speed: regex runs first (fast), NER runs second (accurate).
+Orchestrates a pipeline of DetectorBackend instances for comprehensive
+sensitive data detection. Default pipeline: regex -> NER -> LLM.
+
+Custom backends can be injected via the `backends` parameter.
 """
 
 from __future__ import annotations
@@ -11,10 +13,7 @@ import re
 import time
 from dataclasses import dataclass
 
-import warnings
-
 from cloakllm.config import ShieldConfig
-from cloakllm.locale_patterns import LOCALE_PATTERNS
 
 ALLOWED_SPACY_MODELS = frozenset({
     "en_core_web_sm", "en_core_web_md", "en_core_web_lg", "en_core_web_trf",
@@ -125,210 +124,91 @@ PATTERNS: dict[str, tuple[str, str]] = {
 
 
 class DetectionEngine:
-    """Detects PII and sensitive data in text using NER + regex."""
+    """Orchestrates a pipeline of detection backends."""
 
-    def __init__(self, config: ShieldConfig):
+    def __init__(self, config: ShieldConfig, backends: list | None = None):
         self.config = config
-        self._nlp = None
-        self._compiled_patterns: list[tuple[str, re.Pattern]] = []
-        self._build_patterns()
+        self._backends: list = []
 
-        # --- LLM detector (opt-in Pass 3) ---
-        self._llm_detector = None
-        if config.llm_detection:
-            from cloakllm.llm_detector import LlmDetector
-            self._llm_detector = LlmDetector(config)
+        if backends is not None:
+            # Custom pipeline — use provided backends as-is
+            self._backends = list(backends)
+        else:
+            # Default pipeline: regex -> NER -> LLM
+            self._build_default_pipeline()
 
-    @staticmethod
-    def _test_regex_safety(regex: re.Pattern) -> bool:
-        """Test if a regex is safe from catastrophic backtracking."""
-        test_inputs = [
-            'a' * 25 + '!',
-            '1' * 25 + '!',
-            ' ' * 25 + '!',
-            ('a1 ' * 8) + '!',
-            '@' * 25 + '!',
-        ]
-        for test_input in test_inputs:
-            start = time.monotonic()
-            regex.search(test_input)
-            if (time.monotonic() - start) >= 0.02:
-                return False
-        return True
+    def _build_default_pipeline(self):
+        """Build the default 3-pass detection pipeline."""
+        from cloakllm.backends.regex import RegexBackend
+        from cloakllm.backends.ner import NerBackend
+        from cloakllm.backends.llm import LlmBackend
 
-    def _build_patterns(self):
-        """Compile regex patterns based on config."""
-        pattern_map = {
-            "EMAIL": self.config.detect_emails,
-            "SSN": self.config.detect_ssns,
-            "CREDIT_CARD": self.config.detect_credit_cards,
-            "PHONE": self.config.detect_phones,
-            "IP_ADDRESS": self.config.detect_ip_addresses,
-            "API_KEY": self.config.detect_api_keys,
-            "AWS_KEY": self.config.detect_api_keys,
-            "JWT": self.config.detect_api_keys,
-            "IBAN": self.config.detect_iban,
-            "IL_ID": False,  # High false-positive rate, disabled by default
-        }
+        # Pass 1: Regex (always)
+        self._backends.append(RegexBackend(self.config))
 
-        # Custom patterns first — user-defined patterns take priority
-        for name, pattern in self.config.custom_patterns:
-            try:
-                compiled = re.compile(pattern)
-                if not self._test_regex_safety(compiled):
-                    warnings.warn(
-                        f"CloakLLM: Custom pattern '{name}' failed safety check "
-                        f"(potential ReDoS) — skipped",
-                        RuntimeWarning,
-                        stacklevel=2,
-                    )
-                    continue
-                self._compiled_patterns.append((name, compiled))
-            except re.error:
-                warnings.warn(
-                    f"Invalid custom regex pattern for '{name}': {pattern!r}",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
+        # Pass 2: NER (always — lazy-loads spaCy)
+        ner_backend = NerBackend(self.config)
+        self._backends.append(ner_backend)
 
-        # Locale patterns second — before built-in so locale-specific patterns
-        # (e.g., PHONE_DE) take priority over universal patterns (e.g., PHONE)
-        # via covered-span overlap checks.
-        locale = getattr(self.config, 'locale', 'en')
-        for category, _hint, pattern_str in LOCALE_PATTERNS.get(locale, []):
-            try:
-                compiled = re.compile(pattern_str)
-                if self._test_regex_safety(compiled):
-                    self._compiled_patterns.append((category, compiled))
-            except re.error:
-                pass
+        # Pass 3: LLM (opt-in)
+        if self.config.llm_detection:
+            llm_backend = LlmBackend(self.config)
+            self._backends.append(llm_backend)
 
-        # Built-in patterns third
-        for name, (_, pattern) in PATTERNS.items():
-            if pattern_map.get(name, True):
-                self._compiled_patterns.append(
-                    (name, re.compile(pattern))
-                )
+    # --- Backward compatibility properties ---
 
-        # Safety-check all patterns (including built-in)
-        for name, pattern in self._compiled_patterns:
-            if not self._test_regex_safety(pattern):
-                warnings.warn(
-                    f"CloakLLM: Pattern '{name}' failed ReDoS safety check — this is a bug",
-                    RuntimeWarning, stacklevel=2,
-                )
+    @property
+    def _nlp(self):
+        """Backward compat: access the spaCy model from NerBackend."""
+        for backend in self._backends:
+            if hasattr(backend, 'nlp'):
+                return backend.nlp
+        return None
 
     @property
     def nlp(self):
-        """Lazy-load spaCy model. Falls back to blank model if not installed."""
-        if self._nlp is None:
-            try:
-                import spacy
-                try:
-                    self._nlp = spacy.load(self.config.spacy_model)
-                except OSError:
-                    # Validate model name before attempting download
-                    if self.config.spacy_model not in ALLOWED_SPACY_MODELS:
-                        warnings.warn(
-                            f"spaCy model '{self.config.spacy_model}' not in allowed list. "
-                            f"Auto-download skipped. Install manually.",
-                            RuntimeWarning,
-                            stacklevel=2,
-                        )
-                        self._nlp = spacy.blank("en")
-                        return self._nlp
-                    # Model not installed — try downloading it
-                    try:
-                        import subprocess
-                        import sys
-                        subprocess.check_call(
-                            [sys.executable, "-m", "spacy", "download",
-                             self.config.spacy_model],
-                            timeout=60,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                        )
-                        self._nlp = spacy.load(self.config.spacy_model)
-                    except Exception:
-                        # Download failed — use blank model (regex still works)
-                        warnings.warn(
-                            f"spaCy model '{self.config.spacy_model}' not available. "
-                            f"NER detection disabled. Regex patterns still active. "
-                            f"Install with: python -m spacy download {self.config.spacy_model}",
-                            RuntimeWarning,
-                            stacklevel=2,
-                        )
-                        self._nlp = spacy.blank("en")
-            except ImportError:
-                raise ImportError(
-                    "spaCy is required: pip install spacy"
-                )
+        """Backward compat: access the spaCy model from NerBackend."""
         return self._nlp
+
+    @property
+    def _compiled_patterns(self):
+        """Backward compat: access compiled patterns from RegexBackend."""
+        for backend in self._backends:
+            if hasattr(backend, '_compiled_patterns'):
+                return backend._compiled_patterns
+        return []
+
+    @property
+    def _llm_detector(self):
+        """Backward compat: access the LLM detector."""
+        for backend in self._backends:
+            if hasattr(backend, '_detector') and backend.name == "llm":
+                return backend._detector
+        return None
+
+    @staticmethod
+    def _test_regex_safety(regex: re.Pattern) -> bool:
+        """Backward compat: delegates to RegexBackend._test_regex_safety."""
+        from cloakllm.backends.regex import RegexBackend
+        return RegexBackend._test_regex_safety(regex)
 
     def detect(self, text: str) -> tuple[list[Detection], dict[str, float]]:
         """
         Detect all sensitive entities in text.
         Returns (detections, timing) where detections are sorted by start
-        position and timing contains per-pass millisecond breakdowns.
+        position and timing contains per-backend millisecond breakdowns.
         """
         detections: list[Detection] = []
         covered_spans: list[tuple[int, int]] = []
         timing: dict[str, float] = {}
 
-        # --- Pass 1: Regex (fast, high precision for structured data) ---
-        t0 = time.perf_counter()
-        for name, pattern in self._compiled_patterns:
-            for match in pattern.finditer(text):
-                start, end = match.start(), match.end()
-                # Skip if overlapping with existing detection
-                if any(start < e and end > s for s, e in covered_spans):
-                    continue
-                # Validate: skip short phone-like matches that are likely just numbers
-                if name == "PHONE" and len(match.group().replace("-", "").replace(" ", "").replace(".", "")) < 7:
-                    continue
-                detections.append(Detection(
-                    text=match.group(),
-                    category=name,
-                    start=start,
-                    end=end,
-                    confidence=0.95,
-                    source="regex",
-                ))
-                covered_spans.append((start, end))
-        timing["regex_ms"] = round((time.perf_counter() - t0) * 1000, 2)
-
-        # --- Pass 2: spaCy NER (slower, catches names/orgs/locations) ---
-        t0 = time.perf_counter()
-        doc = self.nlp(text)
-        for ent in doc.ents:
-            if ent.label_ not in self.config.ner_entity_types:
-                continue
-            # Map raw NER label to canonical CloakLLM category
-            mapped_label = _NER_LABEL_MAP.get(ent.label_, ent.label_)
-            start, end = ent.start_char, ent.end_char
-            # Skip if already detected by regex
-            if any(start < e and end > s for s, e in covered_spans):
-                continue
-            # Skip very short entities (likely false positives)
-            if len(ent.text.strip()) < 2:
-                continue
-            detections.append(Detection(
-                text=ent.text,
-                category=mapped_label,
-                start=start,
-                end=end,
-                confidence=0.85,
-                source="ner",
-            ))
-            covered_spans.append((start, end))
-        timing["ner_ms"] = round((time.perf_counter() - t0) * 1000, 2)
-
-        # --- Pass 3: Local LLM (semantic/contextual PII, opt-in) ---
-        t0 = time.perf_counter()
-        if self._llm_detector is not None:
-            llm_detections = self._llm_detector.detect(text, covered_spans)
-            detections.extend(llm_detections)
-        timing["llm_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+        for backend in self._backends:
+            t0 = time.perf_counter()
+            backend_detections = backend.detect(text, covered_spans)
+            timing[f"{backend.name}_ms"] = round(
+                (time.perf_counter() - t0) * 1000, 2
+            )
+            detections.extend(backend_detections)
 
         # Sort by start position (important for tokenization)
         detections.sort(key=lambda d: d.start)

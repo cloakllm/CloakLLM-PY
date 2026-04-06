@@ -947,7 +947,7 @@ class TestMetrics:
         assert "detection_ms" in timing
         assert "regex_ms" in timing
         assert "ner_ms" in timing
-        assert "llm_ms" in timing
+        # llm_ms only present when LLM detection is enabled
         assert "tokenization_ms" in timing
         assert timing["total_ms"] >= 0
         assert timing["regex_ms"] >= 0
@@ -1018,7 +1018,7 @@ class TestMetrics:
         _, timing = detector.detect("Email john@acme.com, call 555-123-4567")
         assert "regex_ms" in timing
         assert "ner_ms" in timing
-        assert "llm_ms" in timing
+        # llm_ms only present when LLM detection is enabled
         assert all(isinstance(v, float) for v in timing.values())
 
     def test_audit_chain_valid_with_timing(self, shield):

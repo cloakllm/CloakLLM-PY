@@ -5,6 +5,30 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-04-06
+
+### Added
+
+- **Pluggable Detection Backends** — `DetectorBackend` ABC for custom detection pipelines
+  - New `cloakllm.backends` package: `DetectorBackend`, `RegexBackend`, `NerBackend`, `LlmBackend`
+  - `DetectionEngine` accepts optional `backends` parameter to replace the default pipeline
+  - `Shield` accepts optional `backends` parameter, forwarded to `DetectionEngine`
+  - Custom backends implement `name` property + `detect(text, covered_spans)` method
+  - All backend classes exported from top-level `cloakllm` package
+
+### Changed
+
+- `DetectionEngine` refactored from inline 3-pass detection to backend pipeline orchestrator
+- Metrics timing keys are now dynamic (`{backend.name}_ms`) instead of hardcoded `regex_ms`/`ner_ms`/`llm_ms`
+- Attestation `detection_passes` derived from active backends instead of config introspection
+- `_empty_metrics()` changed from `@staticmethod` to instance method (reads backend names)
+- `_accumulate_metrics()` handles dynamic timing keys from custom backends
+
+### Removed
+
+- Redundant final regex safety-check sweep in pattern compilation (custom/locale already checked individually)
+- Duplicated `_test_regex_safety` in `DetectionEngine` (now delegates to `RegexBackend`)
+
 ## [0.5.1] - 2026-03-31
 
 ### Added

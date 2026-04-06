@@ -42,9 +42,9 @@ class Shield:
         clean_response = shield.desanitize(response_text, token_map)
     """
 
-    def __init__(self, config: Optional[ShieldConfig] = None):
+    def __init__(self, config: Optional[ShieldConfig] = None, backends: Optional[list] = None):
         self.config = config or ShieldConfig()
-        self.detector = DetectionEngine(self.config)
+        self.detector = DetectionEngine(self.config, backends=backends)
         self.tokenizer = Tokenizer(self.config)
         self.audit = AuditLogger(self.config)
         self._metrics: dict[str, Any] = self._empty_metrics()
@@ -66,12 +66,15 @@ class Shield:
         # Context analyzer (opt-in)
         self._context_analyzer = ContextAnalyzer() if self.config.context_analysis else None
 
-    @staticmethod
-    def _empty_metrics() -> dict[str, Any]:
+    def _empty_metrics(self) -> dict[str, Any]:
+        backends = getattr(self, 'detector', None)
+        detection_keys = {f"{b.name}_ms": 0.0 for b in (backends._backends if backends else [])}
+        if not detection_keys:
+            detection_keys = {"regex_ms": 0.0, "ner_ms": 0.0, "llm_ms": 0.0}
         return {
             "calls": {"sanitize": 0, "desanitize": 0, "sanitize_batch": 0, "desanitize_batch": 0},
             "total_ms": 0.0,
-            "detection": {"regex_ms": 0.0, "ner_ms": 0.0, "llm_ms": 0.0},
+            "detection": detection_keys,
             "tokenization_ms": 0.0,
             "entities_detected": 0,
             "categories": {},
@@ -84,8 +87,10 @@ class Shield:
         with self._metrics_lock:
             self._metrics["calls"][call_type] += 1
             self._metrics["total_ms"] += total_ms
-            for key in ("regex_ms", "ner_ms", "llm_ms"):
-                self._metrics["detection"][key] += detection_timing.get(key, 0.0)
+            for key, value in detection_timing.items():
+                if key not in self._metrics["detection"]:
+                    self._metrics["detection"][key] = 0.0
+                self._metrics["detection"][key] += value
             self._metrics["tokenization_ms"] += tokenization_ms
             self._metrics["entities_detected"] += entity_count
             for cat, count in categories.items():
@@ -161,11 +166,7 @@ class Shield:
         cert_hash = None
         cert_key_id = None
         if self._attestation_key is not None:
-            detection_passes = ["regex"]
-            if self.detector._nlp is not None and "ner" in self.detector._nlp.pipe_names:
-                detection_passes.append("ner")
-            if self.config.llm_detection:
-                detection_passes.append("llm")
+            detection_passes = [b.name for b in self.detector._backends]
             cert = SanitizationCertificate.create(
                 original_text=text,
                 sanitized_text=sanitized,
@@ -250,7 +251,7 @@ class Shield:
         sanitized_texts = []
         all_entity_details = []
         total_detections = 0
-        combined_detection_timing: dict[str, float] = {"regex_ms": 0.0, "ner_ms": 0.0, "llm_ms": 0.0}
+        combined_detection_timing: dict[str, float] = {}
         total_detection_ms = 0.0
         total_tokenization_ms = 0.0
 
@@ -258,8 +259,8 @@ class Shield:
             t0 = time.perf_counter()
             detections, detection_timing = self.detector.detect(text)
             total_detection_ms += (time.perf_counter() - t0) * 1000
-            for key in ("regex_ms", "ner_ms", "llm_ms"):
-                combined_detection_timing[key] += detection_timing.get(key, 0.0)
+            for key, value in detection_timing.items():
+                combined_detection_timing[key] = combined_detection_timing.get(key, 0.0) + value
 
             t0 = time.perf_counter()
             sanitized, token_map = self.tokenizer.tokenize(text, detections, token_map)
@@ -320,11 +321,7 @@ class Shield:
             input_tree = MerkleTree(input_hashes)
             output_tree = MerkleTree(output_hashes)
 
-            detection_passes = ["regex"]
-            if self.detector._nlp is not None and "ner" in self.detector._nlp.pipe_names:
-                detection_passes.append("ner")
-            if self.config.llm_detection:
-                detection_passes.append("llm")
+            detection_passes = [b.name for b in self.detector._backends]
 
             cert = SanitizationCertificate.create(
                 original_text=None,
