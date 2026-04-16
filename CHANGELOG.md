@@ -5,6 +5,32 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-04-16
+
+### Added
+
+- **Article 12 Compliance Mode** — formal EU AI Act compliance profile
+  - `ShieldConfig(compliance_mode="eu_ai_act_article12")` enforces compliant audit log structure
+  - Audit entries gain four new fields: `compliance_version`, `article_ref`, `retention_hint_days`, `pii_in_log`
+  - Compliance fields are part of the SHA-256 hash chain (tamper-detectable)
+  - Configurable retention hint via `ShieldConfig(retention_hint_days=N)` — defaults to 180 (Article 12 minimum for deployers)
+- **`Shield.compliance_summary()`** — structured coverage map of EU AI Act and GDPR articles addressed by current configuration
+- **`Shield.export_compliance_config(path)`** — exports a JSON snapshot suitable for handing to an auditor
+- **`Shield.verify_audit(output_format="compliance_report")`** — structured compliance report with `verdict: "COMPLIANT" | "NON_COMPLIANT"`
+- **CLI:** `cloakllm verify <dir> --format compliance_report` — emits a JSON compliance report; exits 1 on NON_COMPLIANT
+- **Enterprise Key Management** (folded from v0.5.3 plan) — KMS/HSM signing key support
+  - New `cloakllm.key_provider` module: `KeyProvider` ABC + `LocalKeyProvider`, `AwsKmsKeyProvider`, `GcpKmsKeyProvider`, `AzureKeyVaultProvider`, `HashicorpVaultProvider`
+  - Config: `attestation_key_provider`, `attestation_key_id`, `key_rotation_enabled`
+  - When `key_rotation_enabled=True`, a `key_rotation_event` audit entry is logged at session init (no PII — just key id, provider, version)
+  - New optional dependency group: `pip install cloakllm[kms]`
+- **`_assert_no_pii_in_entry` runtime guard** in `audit.py` — refuses to write any audit entry whose `entity_details` contain forbidden PII fields (`original_value`, `original_text`, `raw_text`, `plain_text`, `value`)
+
+### Notes
+
+- All changes are backward-compatible. Default behavior is unchanged when `compliance_mode` is `None`.
+- `Shield.verify_audit()` without arguments returns the existing `{valid, errors, final_seq}` shape; `output_format` is opt-in.
+- v0.5.3 (Enterprise Key Management) was folded into this release.
+
 ## [0.5.2] - 2026-04-06
 
 ### Added

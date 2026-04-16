@@ -19,7 +19,7 @@ Standalone usage:
     # sanitized: "Send email to [EMAIL_0] about [ORG_0]"
 """
 
-__version__ = "0.5.2"
+__version__ = "0.6.0"
 
 from cloakllm.shield import Shield
 from cloakllm.config import ShieldConfig
@@ -37,6 +37,15 @@ from cloakllm.attestation import (
 )
 from cloakllm.context_analyzer import ContextAnalyzer, RiskAssessment
 from cloakllm.backends import DetectorBackend, RegexBackend, NerBackend, LlmBackend
+from cloakllm.key_provider import (
+    KeyProvider,
+    LocalKeyProvider,
+    AwsKmsKeyProvider,
+    GcpKmsKeyProvider,
+    AzureKeyVaultProvider,
+    HashicorpVaultProvider,
+    build_key_provider,
+)
 from cloakllm.token_spec import (
     validate_token,
     parse_token,
@@ -74,4 +83,11 @@ __all__ = [
     "RegexBackend",
     "NerBackend",
     "LlmBackend",
+    "KeyProvider",
+    "LocalKeyProvider",
+    "AwsKmsKeyProvider",
+    "GcpKmsKeyProvider",
+    "AzureKeyVaultProvider",
+    "HashicorpVaultProvider",
+    "build_key_provider",
 ]

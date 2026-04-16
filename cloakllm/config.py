@@ -137,6 +137,32 @@ class ShieldConfig:
         default_factory=lambda: os.getenv("CLOAKLLM_SIGNING_KEY_PATH", None)
     )
 
+    # --- Compliance Mode (v0.6.0) ---
+    # When set, enforces an Article 12-compliant audit log structure and
+    # adds compliance metadata fields to every log entry.
+    # Accepted values: "eu_ai_act_article12" | None
+    compliance_mode: Optional[str] = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_COMPLIANCE_MODE", None)
+    )
+    # Retention hint included in compliance-mode audit entries.
+    # 180 = EU AI Act Article 12 minimum (6 months for deployers).
+    retention_hint_days: int = 180
+
+    # --- Enterprise Key Management (v0.6.0, Python only) ---
+    # Provider for attestation signing keys.
+    # Accepted values: "aws_kms" | "gcp_kms" | "azure_keyvault" | "hashicorp_vault" | None
+    attestation_key_provider: Optional[str] = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_KEY_PROVIDER", None)
+    )
+    # Provider-specific key ID/ARN/name
+    attestation_key_id: Optional[str] = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_KEY_ID", None)
+    )
+    # If True, checks key version on session init and logs a key_rotation_event
+    key_rotation_enabled: bool = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_KEY_ROTATION", "false").lower() == "true"
+    )
+
     # --- LiteLLM Integration ---
     # Auto-sanitize on request, auto-desanitize on response
     auto_mode: bool = True
@@ -147,6 +173,28 @@ class ShieldConfig:
         self.log_dir = Path(self.log_dir)
         if self.mode not in ("tokenize", "redact"):
             raise ValueError(f"Invalid mode '{self.mode}'. Must be 'tokenize' or 'redact'.")
+        # Compliance mode validation
+        _VALID_COMPLIANCE_MODES = (None, "eu_ai_act_article12")
+        if self.compliance_mode not in _VALID_COMPLIANCE_MODES:
+            raise ValueError(
+                f"Invalid compliance_mode '{self.compliance_mode}'. "
+                f"Must be one of {[m for m in _VALID_COMPLIANCE_MODES if m]} or None."
+            )
+        if self.retention_hint_days < 1:
+            raise ValueError(
+                f"retention_hint_days must be >= 1 (got {self.retention_hint_days})."
+            )
+        # Key provider validation
+        _VALID_KEY_PROVIDERS = (None, "aws_kms", "gcp_kms", "azure_keyvault", "hashicorp_vault")
+        if self.attestation_key_provider not in _VALID_KEY_PROVIDERS:
+            raise ValueError(
+                f"Invalid attestation_key_provider '{self.attestation_key_provider}'. "
+                f"Must be one of {[p for p in _VALID_KEY_PROVIDERS if p]} or None."
+            )
+        if self.attestation_key_provider and not self.attestation_key_id:
+            raise ValueError(
+                f"attestation_key_id is required when attestation_key_provider='{self.attestation_key_provider}'."
+            )
         from cloakllm.token_spec import validate_category_name, RESERVED_CATEGORIES
         for name, _desc in self.custom_llm_categories:
             if not validate_category_name(name):

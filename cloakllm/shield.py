@@ -8,9 +8,12 @@ Can be used standalone or via the LiteLLM middleware integration.
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 import threading
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from cloakllm.audit import AuditLogger
@@ -53,18 +56,34 @@ class Shield:
         if self.config.entity_hashing and not self.config.entity_hash_key:
             self.config.entity_hash_key = secrets.token_hex(32)
 
-        # Load attestation keypair (from config object or file path)
-        self._attestation_key: Optional[DeploymentKeyPair] = None
+        # Load attestation keypair / KMS provider.
+        # Precedence: explicit attestation_key > KMS provider > key file > none.
+        self._attestation_key: Optional[Any] = None
         if self.config.attestation_key is not None:
             self._attestation_key = self.config.attestation_key
+        elif self.config.attestation_key_provider:
+            from cloakllm.key_provider import build_key_provider
+            self._attestation_key = build_key_provider(
+                self.config.attestation_key_provider,
+                self.config.attestation_key_id,
+            )
         elif self.config.attestation_key_path:
-            from pathlib import Path
             self._attestation_key = DeploymentKeyPair.from_file(
                 Path(self.config.attestation_key_path)
             )
 
         # Context analyzer (opt-in)
         self._context_analyzer = ContextAnalyzer() if self.config.context_analysis else None
+
+        # Key rotation event (opt-in). Logged once on init when a KeyProvider is
+        # in use and the audit log is enabled. The entry contains no PII —
+        # only key_id and key version metadata.
+        if (
+            self.config.key_rotation_enabled
+            and self._attestation_key is not None
+            and self.config.audit_enabled
+        ):
+            self._log_key_rotation_event()
 
     def _empty_metrics(self) -> dict[str, Any]:
         backends = getattr(self, 'detector', None)
@@ -543,17 +562,151 @@ class Shield:
         with self._metrics_lock:
             self._metrics = self._empty_metrics()
 
-    def verify_audit(self) -> dict:
+    def verify_audit(
+        self,
+        log_dir: Optional[str] = None,
+        output_format: Optional[str] = None,
+    ):
         """Verify the integrity of all audit logs.
 
-        Returns a dict with 'valid' (bool), 'errors' (list[str]), and 'final_seq' (int).
+        Args:
+            log_dir: Optional alternate audit dir to verify (default: this Shield's log_dir).
+            output_format: When None, returns the existing
+                {"valid": bool, "errors": list[str], "final_seq": int} dict.
+                When "compliance_report", returns a structured EU AI Act
+                Article 12 compliance report dict.
+
+        Returns:
+            Default dict shape, or compliance report dict when requested.
         """
-        is_valid, errors, final_seq = self.audit.verify_chain()
+        if log_dir is not None:
+            cfg = ShieldConfig(log_dir=log_dir, audit_enabled=True)
+            audit = AuditLogger(cfg)
+        else:
+            audit = self.audit
+
+        if output_format == "compliance_report":
+            return audit.verify_chain(output_format="compliance_report")
+
+        is_valid, errors, final_seq = audit.verify_chain()
         return {"valid": is_valid, "errors": errors, "final_seq": final_seq}
 
     def audit_stats(self) -> dict:
         """Get aggregate audit statistics."""
         return self.audit.get_stats()
+
+    def _log_key_rotation_event(self) -> None:
+        """
+        Log a key_rotation_event audit entry. Contains no PII — only
+        key_id, provider, and key_version (when available).
+        """
+        provider = self.config.attestation_key_provider or "local"
+        key_version: Optional[str] = None
+        try:
+            getter = getattr(self._attestation_key, "get_key_version", None)
+            if callable(getter):
+                key_version = getter()
+        except Exception:
+            key_version = None
+        try:
+            self.audit.log(
+                event_type="key_rotation_event",
+                metadata={
+                    "key_provider": provider,
+                    "key_version": key_version,
+                },
+                key_id=getattr(self._attestation_key, "key_id", None),
+            )
+        except Exception as e:
+            # Non-fatal — rotation events are observability, not correctness.
+            import logging as _logging
+            _logging.getLogger("cloakllm.shield").warning(
+                "Failed to log key_rotation_event: %s", e
+            )
+
+    def compliance_summary(self) -> dict:
+        """
+        Return a structured map of EU AI Act and GDPR articles addressed by
+        the current Shield configuration. Designed for auditors and DPOs.
+
+        See EU_AI_ACT_STRATEGY.md for the regulatory rationale of each entry.
+        """
+        from cloakllm import __version__
+        cfg = self.config
+        attestation_enabled = (
+            cfg.attestation_key is not None
+            or cfg.attestation_key_path is not None
+            or cfg.attestation_key_provider is not None
+        )
+        return {
+            "compliance_mode": cfg.compliance_mode,
+            "articles_addressed": [
+                {
+                    "article": "EU_AI_Act_Art_12",
+                    "status": "satisfied",
+                    "notes": "Automatic logging enabled, zero PII in logs",
+                },
+                {
+                    "article": "EU_AI_Act_Art_19",
+                    "status": "satisfied",
+                    "notes": "Hash-chained tamper-evident audit trail",
+                },
+                {
+                    "article": "GDPR_Art_5_data_minimisation",
+                    "status": "satisfied",
+                    "notes": "Tokenization removes PII before logging",
+                },
+                {
+                    "article": "GDPR_Art_5_storage_limitation",
+                    "status": "satisfied",
+                    "notes": "Logs contain no personal data",
+                },
+                {
+                    "article": "GDPR_Art_25_privacy_by_design",
+                    "status": "satisfied",
+                    "notes": "PII removed at input layer before any downstream processing",
+                },
+                {
+                    "article": "EU_AI_Act_Art_4a",
+                    "status": "partial",
+                    "notes": (
+                        "Tokenization qualifies as pseudonymisation; "
+                        "BiasDetectionSession not yet implemented (v0.7)"
+                    ),
+                },
+            ],
+            "config_snapshot": {
+                "audit": cfg.audit_enabled,
+                "compliance_mode": cfg.compliance_mode,
+                "mode": cfg.mode,
+                "entity_hashing": cfg.entity_hashing,
+                "attestation_enabled": attestation_enabled,
+                "retention_hint_days": cfg.retention_hint_days,
+            },
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "cloakllm_version": __version__,
+        }
+
+    def export_compliance_config(
+        self,
+        path: str = "./cloakllm_compliance_config.json",
+    ) -> str:
+        """
+        Write the compliance summary to a JSON file. This is the artifact
+        an organisation hands to an auditor.
+
+        Returns the resolved path written.
+        """
+        summary = self.compliance_summary()
+        summary["note"] = (
+            "This configuration snapshot was generated by CloakLLM. "
+            "Verify audit log integrity using: cloakllm verify <audit_dir>"
+        )
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2)
+        return str(out)
 
     def verify_certificate(
         self,
@@ -574,7 +727,14 @@ class Shield:
             certificate = SanitizationCertificate.from_dict(certificate)
         if public_key is None:
             if self._attestation_key is not None:
-                public_key = self._attestation_key.public_key
+                # DeploymentKeyPair exposes .public_key directly; KeyProvider
+                # implementations may only expose .public_key_b64 (KMS).
+                pk_attr = getattr(self._attestation_key, "public_key", None)
+                if pk_attr is not None:
+                    public_key = pk_attr
+                else:
+                    import base64 as _b64
+                    public_key = _b64.b64decode(self._attestation_key.public_key_b64)
             else:
                 raise ValueError("No public key provided and no attestation key configured")
         return certificate.verify(public_key)

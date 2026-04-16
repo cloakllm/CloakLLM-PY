@@ -27,6 +27,29 @@ from cloakllm.config import ShieldConfig
 GENESIS_HASH = "0" * 64  # SHA-256 of nothing — the chain anchor
 
 
+_PII_FORBIDDEN_KEYS = ("original_value", "original_text", "raw_text", "plain_text", "value")
+
+
+def _assert_no_pii_in_entry(entry_data: dict) -> None:
+    """
+    Runtime invariant guard for compliance mode.
+
+    Asserts that no entity-level fields contain raw/original PII text.
+    Raises RuntimeError if violated. This is the structural enforcement
+    of the "audit logs must contain zero original PII" invariant.
+    """
+    details = entry_data.get("entity_details") or []
+    for i, detail in enumerate(details):
+        if not isinstance(detail, dict):
+            continue
+        for forbidden in _PII_FORBIDDEN_KEYS:
+            if forbidden in detail:
+                raise RuntimeError(
+                    f"COMPLIANCE VIOLATION: entity_details[{i}] contains forbidden "
+                    f"field '{forbidden}'. Audit logs must not contain original PII."
+                )
+
+
 @dataclass
 class AuditEntry:
     """A single entry in the tamper-evident audit log."""
@@ -51,6 +74,11 @@ class AuditEntry:
     entry_hash: str             # Hash of this entry (computed from all fields + prev_hash)
     metadata: dict[str, Any]    # Additional context (user_id, session_id, etc.)
     risk_assessment: Optional[dict]  # Context-based PII leakage risk (when context_analysis enabled)
+    # --- Compliance Mode (v0.6.0) — only populated when config.compliance_mode is set ---
+    compliance_version: Optional[str] = None      # e.g. "eu_ai_act_article12_v1"
+    article_ref: Optional[list[str]] = None       # Articles satisfied, e.g. ["EU_AI_Act_Art_12", ...]
+    retention_hint_days: Optional[int] = None     # Recommended log retention period
+    pii_in_log: Optional[bool] = None             # Always False in compliance mode (asserted)
 
 
 class AuditLogger:
@@ -185,6 +213,15 @@ class AuditLogger:
                 "risk_assessment": risk_assessment,
             }
 
+            # Compliance mode injection (v0.6.0) — fields are part of the hash chain.
+            if self.config.compliance_mode == "eu_ai_act_article12":
+                entry_data["compliance_version"] = "eu_ai_act_article12_v1"
+                entry_data["article_ref"] = ["EU_AI_Act_Art_12", "EU_AI_Act_Art_19"]
+                entry_data["retention_hint_days"] = self.config.retention_hint_days
+                entry_data["pii_in_log"] = False
+                # Runtime invariant: no PII may leak into entity_details
+                _assert_no_pii_in_entry(entry_data)
+
             # Compute entry hash (includes prev_hash for chain integrity)
             entry_hash = self._compute_hash(entry_data)
             entry_data["entry_hash"] = entry_hash
@@ -199,14 +236,37 @@ class AuditLogger:
 
             return AuditEntry(**entry_data)
 
-    def verify_chain(self, log_file: Optional[Path] = None) -> tuple[bool, list[str], int]:
+    def verify_chain(
+        self,
+        log_file: Optional[Path] = None,
+        output_format: Optional[str] = None,
+    ):
         """
         Verify the integrity of the entire audit chain.
 
-        Returns (is_valid, list_of_errors, final_seq).
+        Args:
+            log_file: Specific log file to verify. If None, all files in log_dir.
+            output_format: When None (default), returns the existing
+                (is_valid, errors, final_seq) tuple — backward compatible.
+                When "compliance_report", returns a structured dict with
+                period, totals, category aggregates, and verdict.
+
+        Returns (is_valid, errors, final_seq) by default, or a dict
+        when output_format="compliance_report".
         """
         errors: list[str] = []
         final_seq = 0
+
+        # Compliance-report aggregates (only populated when requested)
+        report_enabled = output_format == "compliance_report"
+        first_ts: Optional[str] = None
+        last_ts: Optional[str] = None
+        total_entries = 0
+        compliance_mode_entries = 0
+        non_compliance_mode_entries = 0
+        certificates_present = 0
+        pii_categories_detected: dict[str, int] = {}
+        pii_in_logs = False
 
         if log_file:
             files = [log_file]
@@ -214,6 +274,20 @@ class AuditLogger:
             files = sorted(self._log_dir.glob("audit_*.jsonl"))
 
         if not files:
+            if report_enabled:
+                return self._build_compliance_report(
+                    audit_dir=str(self._log_dir),
+                    first_ts=None,
+                    last_ts=None,
+                    total_entries=0,
+                    compliance_mode_entries=0,
+                    non_compliance_mode_entries=0,
+                    certificates_present=0,
+                    pii_categories_detected={},
+                    pii_in_logs=False,
+                    chain_valid=True,
+                    anomalies=[],
+                )
             return True, [], 0
 
         prev_hash = GENESIS_HASH
@@ -244,6 +318,33 @@ class AuditLogger:
                             f"got {entry.get('prev_hash', 'MISSING')[:16]}..."
                         )
 
+                    # Compliance-report aggregation (before pop'ing entry_hash)
+                    if report_enabled:
+                        total_entries += 1
+                        ts = entry.get("timestamp")
+                        if ts:
+                            if first_ts is None or ts < first_ts:
+                                first_ts = ts
+                            if last_ts is None or ts > last_ts:
+                                last_ts = ts
+                        if entry.get("compliance_version"):
+                            compliance_mode_entries += 1
+                            # Hard check: pii_in_log must be False in compliance mode
+                            if entry.get("pii_in_log") is True:
+                                pii_in_logs = True
+                                errors.append(
+                                    f"{fpath.name}:{line_num} seq={entry.get('seq')} — "
+                                    f"COMPLIANCE VIOLATION: pii_in_log=true"
+                                )
+                        else:
+                            non_compliance_mode_entries += 1
+                        if entry.get("certificate_hash"):
+                            certificates_present += 1
+                        for cat, count in (entry.get("categories") or {}).items():
+                            pii_categories_detected[cat] = (
+                                pii_categories_detected.get(cat, 0) + count
+                            )
+
                     # Recompute entry hash
                     stored_hash = entry.pop("entry_hash", "")
                     recomputed = self._compute_hash(entry)
@@ -256,7 +357,55 @@ class AuditLogger:
 
                     prev_hash = stored_hash
 
-        return len(errors) == 0, errors, final_seq
+        chain_valid = len(errors) == 0
+
+        if report_enabled:
+            return self._build_compliance_report(
+                audit_dir=str(self._log_dir),
+                first_ts=first_ts,
+                last_ts=last_ts,
+                total_entries=total_entries,
+                compliance_mode_entries=compliance_mode_entries,
+                non_compliance_mode_entries=non_compliance_mode_entries,
+                certificates_present=certificates_present,
+                pii_categories_detected=pii_categories_detected,
+                pii_in_logs=pii_in_logs,
+                chain_valid=chain_valid,
+                anomalies=errors,
+            )
+
+        return chain_valid, errors, final_seq
+
+    @staticmethod
+    def _build_compliance_report(
+        *,
+        audit_dir: str,
+        first_ts: Optional[str],
+        last_ts: Optional[str],
+        total_entries: int,
+        compliance_mode_entries: int,
+        non_compliance_mode_entries: int,
+        certificates_present: int,
+        pii_categories_detected: dict[str, int],
+        pii_in_logs: bool,
+        chain_valid: bool,
+        anomalies: list[str],
+    ) -> dict:
+        verdict = "COMPLIANT" if (chain_valid and not pii_in_logs) else "NON_COMPLIANT"
+        return {
+            "audit_dir": audit_dir,
+            "period": {"from": first_ts, "to": last_ts},
+            "total_entries": total_entries,
+            "chain_integrity": "verified" if chain_valid else "broken",
+            "pii_in_logs": pii_in_logs,
+            "compliance_mode_entries": compliance_mode_entries,
+            "non_compliance_mode_entries": non_compliance_mode_entries,
+            "pii_categories_detected": pii_categories_detected,
+            "certificates_present": certificates_present,
+            "anomalies": anomalies,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "verdict": verdict,
+        }
 
     def get_stats(self) -> dict:
         """Get aggregate statistics from audit logs."""

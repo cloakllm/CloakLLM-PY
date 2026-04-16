@@ -93,6 +93,15 @@ def cmd_verify(args):
     config = ShieldConfig(log_dir=log_dir)
     logger = AuditLogger(config)
 
+    output_format = getattr(args, "format", None)
+
+    if output_format == "compliance_report":
+        report = logger.verify_chain(output_format="compliance_report")
+        print(json.dumps(report, indent=2))
+        if report["verdict"] != "COMPLIANT":
+            sys.exit(1)
+        return
+
     print(f"Verifying audit chain in {log_dir}...")
     is_valid, errors, final_seq = logger.verify_chain()
 
@@ -137,6 +146,12 @@ def main():
     # verify
     verify_parser = subparsers.add_parser("verify", help="Verify audit log integrity")
     verify_parser.add_argument("log_dir", help="Path to audit log directory")
+    verify_parser.add_argument(
+        "--format",
+        choices=["compliance_report"],
+        default=None,
+        help="Output format. 'compliance_report' returns a structured EU AI Act Article 12 report (JSON).",
+    )
 
     # stats
     stats_parser = subparsers.add_parser("stats", help="Show audit statistics")
