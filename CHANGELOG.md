@@ -5,6 +5,17 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-04-17
+
+### Fixed (hotfix release for v0.6.1 audit findings)
+
+- **I1 — MCP `CLOAKLLM_COMPLIANCE_MODE` opt-out paths crashed the server.** v0.6.1 documented `=off`/`=""`/`=none`/`=false` as the way to opt out of compliance mode in the MCP server, but the implementation skipped adding `compliance_mode` to ShieldConfig kwargs in those cases; ShieldConfig's default_factory then read the same env var directly and `__post_init__` rejected it as invalid. The MCP server now always passes `compliance_mode` explicitly (either the validated value or `None`).
+
+### Notes
+
+- This is a **patch release**, not the v0.6.2 second-tier security cleanup (H2 SSRF, H3 desanitize hash oracle, H4 chain anchor file, H5 path safety, H8 MCP metadata, M1–M15). That work is deferred to v0.6.3 — see SECURITY_AUDIT_CHAEV_v6.md.
+- npm semver does not support 4-digit versions (e.g., `0.6.1.1`); to keep version parity across all SDKs the hotfix uses `0.6.2`.
+
 ## [0.6.1] - 2026-04-16
 
 ### Security (blocker fixes from internal audit)
