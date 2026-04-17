@@ -115,6 +115,16 @@ class Shield:
             for cat, count in categories.items():
                 self._metrics["categories"][cat] = self._metrics["categories"].get(cat, 0) + count
 
+    def _check_input_length(self, text: str) -> None:
+        """v0.6.1 H1.4: refuse oversized inputs to limit ReDoS exposure."""
+        cap = self.config.max_input_length
+        if cap > 0 and len(text) > cap:
+            raise ValueError(
+                f"Input length {len(text)} exceeds max_input_length={cap}. "
+                f"Set ShieldConfig(max_input_length=...) to raise the cap, "
+                f"or chunk the input."
+            )
+
     def sanitize(
         self,
         text: str,
@@ -135,7 +145,11 @@ class Shield:
 
         Returns:
             (sanitized_text, token_map)
+
+        Raises:
+            ValueError: if len(text) > config.max_input_length (default 1MB).
         """
+        self._check_input_length(text)
         start_time = time.perf_counter()
 
         # Detect sensitive entities
@@ -255,6 +269,13 @@ class Shield:
         Returns:
             (list_of_sanitized_texts, token_map)
         """
+        # v0.6.1 H1.4 — per-text length cap
+        for i, text in enumerate(texts):
+            try:
+                self._check_input_length(text)
+            except ValueError as e:
+                raise ValueError(f"texts[{i}]: {e}") from e
+
         start_time = time.perf_counter()
 
         if token_map is None:
@@ -502,14 +523,35 @@ class Shield:
 
         return result
 
-    def analyze(self, text: str, redact_values: bool = False) -> dict:
+    # F4 sentinel — distinguishes "user passed False explicitly" from
+    # "user didn't pass anything." Used to fire the v0.7.0 default-flip warning.
+    _UNSET = object()
+
+    def analyze(self, text: str, redact_values: Any = _UNSET) -> dict:
         """
         Analyze text for sensitive data without modifying it.
 
-        WARNING: By default, the return value contains raw PII in the 'text'
-        field of each entity. Set redact_values=True to replace with '[redacted]'.
-        Never log or transmit the output of this method without redaction.
+        WARNING: By default (v0.6.x), the return value contains raw PII in the
+        'text' field of each entity. Set ``redact_values=True`` to replace with
+        '[redacted]'. Never log or transmit the output of this method without
+        redaction.
+
+        v0.7.0 will flip the default to ``True``. To silence the deprecation
+        warning, pass ``redact_values`` explicitly.
         """
+        if redact_values is Shield._UNSET:
+            import warnings as _w
+            _w.warn(
+                "Shield.analyze() default for `redact_values` will change "
+                "from False to True in v0.7.0. The current default RETURNS "
+                "RAW PII in the response. Pass `redact_values=False` "
+                "explicitly to keep current behaviour, or `redact_values=True` "
+                "to redact (recommended).",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            redact_values = False
+        self._check_input_length(text)
         detections, _ = self.detector.detect(text)
         return {
             "entity_count": len(detections),
@@ -566,6 +608,8 @@ class Shield:
         self,
         log_dir: Optional[str] = None,
         output_format: Optional[str] = None,
+        *,
+        legacy_canonical: bool = False,
     ):
         """Verify the integrity of all audit logs.
 
@@ -575,6 +619,9 @@ class Shield:
                 {"valid": bool, "errors": list[str], "final_seq": int} dict.
                 When "compliance_report", returns a structured EU AI Act
                 Article 12 compliance report dict.
+            legacy_canonical: When True, use the v0.6.0-compatible canonical
+                JSON encoding to verify pre-v0.6.1 audit chains containing
+                non-ASCII data. Sunset in v0.7.0.
 
         Returns:
             Default dict shape, or compliance report dict when requested.
@@ -586,9 +633,14 @@ class Shield:
             audit = self.audit
 
         if output_format == "compliance_report":
-            return audit.verify_chain(output_format="compliance_report")
+            return audit.verify_chain(
+                output_format="compliance_report",
+                legacy_canonical=legacy_canonical,
+            )
 
-        is_valid, errors, final_seq = audit.verify_chain()
+        is_valid, errors, final_seq = audit.verify_chain(
+            legacy_canonical=legacy_canonical,
+        )
         return {"valid": is_valid, "errors": errors, "final_seq": final_seq}
 
     def audit_stats(self) -> dict:

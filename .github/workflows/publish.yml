@@ -4,6 +4,15 @@ on:
   push:
     tags: ["v*"]
 
+# v0.6.1 H7: scoped permissions + concurrency lock to prevent racing publishes.
+permissions:
+  contents: read
+  id-token: write  # set up for future OIDC trusted publishing
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -22,6 +31,12 @@ jobs:
       - name: Build package
         run: python -m build
 
+      # TODO(v0.6.2): migrate to OIDC trusted publishing once the trusted
+      # publisher is configured on PyPI:
+      #   https://pypi.org/manage/project/cloakllm/settings/publishing/
+      # See https://docs.pypi.org/trusted-publishers/ for setup. After that:
+      #   - uses: pypa/gh-action-pypi-publish@release/v1
+      # and the long-lived PYPI_API_TOKEN secret can be removed.
       - name: Publish to PyPI
         run: twine upload dist/*
         env:

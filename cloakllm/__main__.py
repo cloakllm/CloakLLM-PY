@@ -94,16 +94,20 @@ def cmd_verify(args):
     logger = AuditLogger(config)
 
     output_format = getattr(args, "format", None)
+    legacy = getattr(args, "legacy_canonical_json", False)
 
     if output_format == "compliance_report":
-        report = logger.verify_chain(output_format="compliance_report")
+        report = logger.verify_chain(
+            output_format="compliance_report",
+            legacy_canonical=legacy,
+        )
         print(json.dumps(report, indent=2))
         if report["verdict"] != "COMPLIANT":
             sys.exit(1)
         return
 
     print(f"Verifying audit chain in {log_dir}...")
-    is_valid, errors, final_seq = logger.verify_chain()
+    is_valid, errors, final_seq = logger.verify_chain(legacy_canonical=legacy)
 
     if is_valid:
         print("✅ Audit chain integrity verified — no tampering detected.")
@@ -151,6 +155,17 @@ def main():
         choices=["compliance_report"],
         default=None,
         help="Output format. 'compliance_report' returns a structured EU AI Act Article 12 report (JSON).",
+    )
+    verify_parser.add_argument(
+        "--legacy-canonical-json",
+        action="store_true",
+        default=False,
+        dest="legacy_canonical_json",
+        help=(
+            "Use the v0.6.0 canonical JSON encoding (ensure_ascii=True) when "
+            "verifying. Required for audit chains written by CloakLLM <= 0.6.0 "
+            "that contain non-ASCII characters. Sunset in v0.7.0."
+        ),
     )
 
     # stats

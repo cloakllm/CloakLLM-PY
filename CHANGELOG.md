@@ -5,6 +5,36 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-04-16
+
+### Security (blocker fixes from internal audit)
+
+- **B1 — Cross-language canonical JSON.** Python's `json.dumps` previously defaulted to `ensure_ascii=True`, while JS `JSON.stringify` preserved UTF-8. Cross-SDK certificate verification and audit-chain verification silently broke for any non-ASCII data (names, addresses, etc.). New `cloakllm._canonical.canonical_json` enforces `ensure_ascii=False` and `allow_nan=False`. JS implementation is byte-equivalent. Both SDKs are now verified against a shared cross-language fixture corpus.
+- **B3 — Always-on allow-list audit schema validator.** Replaces v0.6.0's compliance-mode-gated denylist. Runs on EVERY audit write (not just compliance mode) and enforces:
+  - top-level keys must be in the allow-list (rejects arbitrary fields);
+  - `entity_details` elements may only contain the 9 verified-allowed keys (`category, start, end, length, confidence, source, token, entity_hash, text_index`);
+  - `metadata` values must be strict-typed and bounded (max value length 256 chars, max nesting depth 3, only str/int/float/bool/None or homogeneous collections).
+  This enforces the project-wide invariant ("audit logs contain zero original PII") at the structural level — it can no longer be bypassed by a custom `DetectorBackend` writing arbitrary fields, or by a middleware passing arbitrary metadata.
+- **B2 partial — KMS providers disabled (experimental).** `AwsKmsKeyProvider`, `GcpKmsKeyProvider`, `AzureKeyVaultProvider`, and `HashicorpVaultProvider` now raise `NotImplementedError` on `sign()` and `public_key_b64`. Each had bugs in v0.6.0 that produced unverifiable signatures (wrong key encoding, wrong signing algorithm). Use `LocalKeyProvider` until v0.7.0. Tracking issue: see GitHub. **`pip install cloakllm[kms]` still installs the SDKs** so future development continues, but production use is blocked at runtime with a clear error.
+- **B4 — MCP defaults to compliance mode.** `cloakllm-mcp` server now defaults `compliance_mode="eu_ai_act_article12"` so the Article 12 invariant guard fires on every audit write. Set `CLOAKLLM_COMPLIANCE_MODE=` (empty) to disable.
+
+### Security (high-severity fixes)
+
+- **H1 — ReDoS hardening.** Built-in regex patterns (`PHONE`, `IBAN`, `API_KEY`, locale phone patterns) now go through the `_test_regex_safety` harness; they were previously skipped. The harness corpus expanded to exercise the patterns most prone to nested-quantifier blowup. `PHONE` and `IBAN` patterns rewritten to eliminate three-adjacent-optional-digit-group / trailing-separator ambiguity.
+- **H1.4 — Input length cap.** New `ShieldConfig.max_input_length` (default 1MB) bounds input to detection backends. Configurable via `CLOAKLLM_MAX_INPUT_LENGTH` env var. Raises `ValueError` on oversize input.
+- **F1 — API_KEY pattern bound to `{20,512}`.** Original cap of 64 (planned) would have missed Anthropic keys (~100ch), GitHub fine-grained PATs (~94ch), and bearer tokens. Body now also includes `-` and `_` so multi-segment keys are detected. Combined with the global input cap, this limits ReDoS exposure while restoring real-world detection coverage.
+- **H6 — Dependency CVEs.** Bumped `litellm>=1.83.0,<2.0.0` (CVE-2026-35029, CVE-2026-35030, GHSA-69x8-hrgq-fjj8) and `cryptography>=46.0.7,<47.0.0` (CVE-2026-26007, CVE-2026-34073, CVE-2026-39892). All optional dep groups now have upper bounds. Added `pip-audit` to CI (non-fatal until v0.7) and Dependabot config.
+- **H7 — CI/CD hardening.** All workflows now have explicit `permissions: { contents: read }` (publish workflows additionally have `id-token: write`) and `concurrency:` groups to prevent race conditions like the v0.6.0 npm publish race. PyPI OIDC trusted publishing migration tracked as v0.6.2 work.
+- **F5 — `legacy_canonical` shim.** v0.5.x and v0.6.0 audit chains containing non-ASCII data won't verify under the new canonical-JSON encoding. To verify them, use `Shield.verify_audit(legacy_canonical=True)`, `AuditLogger.verify_chain(legacy_canonical=True)`, or `cloakllm verify <dir> --legacy-canonical-json`. Sunset in v0.7.0 with a deprecation warning whenever the flag is set.
+
+### Deprecations
+
+- **F4 — `Shield.analyze()` default `redact_values=False`.** v0.7.0 will flip the default to `True`. Calling `analyze()` without an explicit value now emits a `DeprecationWarning`. Pass `redact_values=False` to keep current behavior or `redact_values=True` (recommended) to silence the warning.
+
+### Known issues
+
+- **`llm_allow_remote=True` SSRF bypass paths (H2).** The Ollama URL validator has known gaps (DNS rebinding, integer/octal IPv4, IPv4-mapped IPv6 metadata addresses). When `llm_allow_remote=True` is set, a `RuntimeWarning` now fires at `LlmDetector` init pointing to the tracking issue. **Do not use `llm_allow_remote=True` in production until v0.6.2.** The default `llm_allow_remote=False` is unaffected.
+
 ## [0.6.0] - 2026-04-16
 
 ### Added

@@ -374,6 +374,37 @@ _PROVIDER_REGISTRY = {
 }
 
 
+_KMS_EXPERIMENTAL_MSG = (
+    "KMS provider {provider!r} is EXPERIMENTAL in v0.6.x and does NOT produce "
+    "verifiable signatures: each provider currently returns the wrong public-key "
+    "encoding and/or signs with the wrong algorithm. Use LocalKeyProvider until "
+    "v0.7.0 (tracking issue: https://github.com/cloakllm/CloakLLM-PY/issues/kms-rebuild)."
+)
+
+
+def _kms_not_implemented(provider_name: str):
+    """Raise NotImplementedError with v0.6.1 experimental-disable message."""
+    raise NotImplementedError(_KMS_EXPERIMENTAL_MSG.format(provider=provider_name))
+
+
+# v0.6.1: monkey-patch the four KMS providers' sign() and public_key_b64
+# property to raise immediately. The class bodies remain so users can still
+# import them and read their docstrings, but any actual use raises.
+for _name, _cls in _PROVIDER_REGISTRY.items():
+    def _make_disabled_sign(provider_name=_name):
+        def sign(self, data: bytes) -> bytes:
+            _kms_not_implemented(provider_name)
+        return sign
+
+    def _make_disabled_pubkey(provider_name=_name):
+        def public_key_b64(self) -> str:
+            _kms_not_implemented(provider_name)
+        return property(public_key_b64)
+
+    _cls.sign = _make_disabled_sign()
+    _cls.public_key_b64 = _make_disabled_pubkey()
+
+
 def build_key_provider(provider_name: str, key_id: str) -> KeyProvider:
     """
     Factory: instantiate the appropriate KMS-backed KeyProvider.

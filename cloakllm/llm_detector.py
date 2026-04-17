@@ -145,9 +145,25 @@ class LlmDetector:
 
     def __init__(self, config: ShieldConfig):
         self._model = config.llm_model
+        # F2.1 (v0.6.1): SSRF hardening lands in v0.6.2. Until then, warn loudly
+        # whenever llm_allow_remote=True is set — the validator currently has
+        # known bypass paths (DNS rebinding, integer/octal IPv4, IPv4-mapped
+        # IPv6 metadata IPs).
+        _allow_remote = getattr(config, 'llm_allow_remote', False)
+        if _allow_remote:
+            import warnings as _w
+            _w.warn(
+                "llm_allow_remote=True has known SSRF bypass paths in v0.6.x "
+                "(DNS rebinding, integer/octal IPv4, IPv4-mapped IPv6 metadata "
+                "addresses). Do NOT use in production until the v0.6.2 SSRF "
+                "hardening lands. Tracking: "
+                "https://github.com/cloakllm/CloakLLM-PY/issues/ssrf-hardening",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         self._base_url = _validate_ollama_url(
             config.llm_ollama_url.rstrip("/"),
-            getattr(config, 'llm_allow_remote', False),
+            _allow_remote,
         )
         self._timeout = config.llm_timeout
         self._confidence = config.llm_confidence

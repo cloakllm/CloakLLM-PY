@@ -6,6 +6,14 @@ on:
   pull_request:
     branches: [main]
 
+# v0.6.1 H7: least-privilege defaults + cancel-on-superseding-push.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -29,3 +37,11 @@ jobs:
 
       - name: Run tests
         run: pytest tests/ -v
+
+      # v0.6.1 H6: scan installed deps for known CVEs each CI run.
+      - name: Audit dependencies (pip-audit)
+        run: pip-audit
+        continue-on-error: true
+        # NOTE: pip-audit failures are non-fatal until v0.7 to avoid breaking
+        # CI on transitive dep CVEs we cannot immediately patch. Operators
+        # should monitor the output and pin/upgrade as needed.

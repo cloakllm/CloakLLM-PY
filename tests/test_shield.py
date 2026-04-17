@@ -325,11 +325,41 @@ class TestEndToEnd:
         assert is_valid
 
     def test_analyze_mode(self, shield):
-        analysis = shield.analyze("Email john@acme.com, SSN 123-45-6789")
+        # Pass redact_values explicitly to silence v0.6.1 F4 deprecation warning
+        analysis = shield.analyze("Email john@acme.com, SSN 123-45-6789", redact_values=False)
         assert analysis["entity_count"] >= 2
         categories = {e["category"] for e in analysis["entities"]}
         assert "EMAIL" in categories
         assert "SSN" in categories
+
+    # --- F4 (v0.6.1): analyze() default redact_values deprecation ---
+
+    def test_analyze_warns_when_redact_values_omitted(self, shield):
+        """v0.6.1 F4: implicit default fires DeprecationWarning."""
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            shield.analyze("john@acme.com")
+        deprecations = [x for x in w if issubclass(x.category, DeprecationWarning)]
+        assert len(deprecations) == 1
+        assert "v0.7.0" in str(deprecations[0].message)
+        assert "redact_values" in str(deprecations[0].message)
+
+    def test_analyze_silent_when_redact_values_explicit_true(self, shield):
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            shield.analyze("john@acme.com", redact_values=True)
+        deprecations = [x for x in w if issubclass(x.category, DeprecationWarning)]
+        assert len(deprecations) == 0
+
+    def test_analyze_silent_when_redact_values_explicit_false(self, shield):
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            shield.analyze("john@acme.com", redact_values=False)
+        deprecations = [x for x in w if issubclass(x.category, DeprecationWarning)]
+        assert len(deprecations) == 0
 
     def test_custom_patterns(self, tmp_path):
         """Custom regex patterns are detected and tokenized."""
@@ -736,7 +766,7 @@ class TestRedactionMode:
     def test_redact_analyze_unaffected(self, tmp_path):
         config = ShieldConfig(mode="redact", log_dir=tmp_path / "audit")
         shield = Shield(config)
-        result = shield.analyze("Email john@acme.com please")
+        result = shield.analyze("Email john@acme.com please", redact_values=False)
         assert result["entity_count"] >= 1
         # analyze returns original text, not redacted
         assert any(e["text"] == "john@acme.com" for e in result["entities"])

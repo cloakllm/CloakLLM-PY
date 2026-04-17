@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from cloakllm._canonical import canonical_json, _legacy_canonical_json
 from cloakllm.config import ShieldConfig
 
 
@@ -30,24 +31,142 @@ GENESIS_HASH = "0" * 64  # SHA-256 of nothing — the chain anchor
 _PII_FORBIDDEN_KEYS = ("original_value", "original_text", "raw_text", "plain_text", "value")
 
 
-def _assert_no_pii_in_entry(entry_data: dict) -> None:
-    """
-    Runtime invariant guard for compliance mode.
+# v0.6.1 B3: allow-list schema validator. Always-on (not gated on compliance_mode).
+# The CLAUDE.md invariant — "CloakLLM audit logs must contain zero original PII" —
+# is a project-wide guarantee. Gating it on a flag would collapse the Article 12
+# Paradox positioning into "CloakLLM resolves the paradox if you turn on the right flag."
+# Users putting raw PII into metadata were always violating the contract.
 
-    Asserts that no entity-level fields contain raw/original PII text.
-    Raises RuntimeError if violated. This is the structural enforcement
-    of the "audit logs must contain zero original PII" invariant.
+# Allow-list of top-level audit-entry keys, mirrored from AuditEntry dataclass.
+_ENTRY_ALLOWED_KEYS = frozenset({
+    "seq", "event_id", "timestamp", "event_type", "model", "provider",
+    "entity_count", "categories", "tokens_used", "prompt_hash", "sanitized_hash",
+    "latency_ms", "mode", "entity_details", "timing", "certificate_hash",
+    "key_id", "prev_hash", "entry_hash", "metadata", "risk_assessment",
+    # v0.6.0 compliance-mode fields
+    "compliance_version", "article_ref", "retention_hint_days", "pii_in_log",
+})
+
+# Allow-list of entity_details element keys. **Verified against actual code emission**
+# (cloakllm-py F3 audit, 2026-04-16): tokenizer.py emits 7 keys, plus entity_hash
+# (when entity_hashing enabled), plus text_index (added by Shield.sanitize_batch).
+_ENTITY_DETAIL_ALLOWED_KEYS = frozenset({
+    "category", "start", "end", "length", "confidence",
+    "source", "token", "entity_hash", "text_index",
+})
+
+# Allowed scalar value types in metadata. Strict whitelist; nested arbitrary
+# objects are rejected to limit attack surface.
+_METADATA_ALLOWED_SCALAR_TYPES = (str, int, float, bool, type(None))
+_METADATA_MAX_VALUE_LEN = 256
+_METADATA_MAX_DEPTH = 3
+
+
+def _validate_metadata_value(value, depth=0, path=""):
+    """Recursively validate a metadata value against the strict schema."""
+    if depth > _METADATA_MAX_DEPTH:
+        raise RuntimeError(
+            f"AUDIT SCHEMA VIOLATION: metadata{path} exceeds max nesting depth "
+            f"of {_METADATA_MAX_DEPTH}."
+        )
+    if isinstance(value, _METADATA_ALLOWED_SCALAR_TYPES):
+        if isinstance(value, str) and len(value) > _METADATA_MAX_VALUE_LEN:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: metadata{path} string exceeds "
+                f"{_METADATA_MAX_VALUE_LEN} chars (got {len(value)}). "
+                f"Long strings risk leaking PII into audit logs."
+            )
+        return
+    if isinstance(value, list):
+        for i, item in enumerate(value):
+            _validate_metadata_value(item, depth + 1, f"{path}[{i}]")
+        return
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if not isinstance(k, str):
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: metadata{path} key {k!r} is not a string."
+                )
+            _validate_metadata_value(v, depth + 1, f"{path}.{k}")
+        return
+    raise RuntimeError(
+        f"AUDIT SCHEMA VIOLATION: metadata{path} has disallowed type "
+        f"{type(value).__name__}. Allowed: str, int, float, bool, None, "
+        f"list of those, dict of those."
+    )
+
+
+def _validate_audit_entry_schema(entry_data: dict) -> None:
     """
+    Always-on allow-list validator for audit entries.
+
+    v0.6.1 B3: replaces the v0.6.0 deny-list `_assert_no_pii_in_entry`.
+    Asserts that:
+      - Top-level keys are a subset of the allow-list (rejects unknown fields).
+      - entity_details elements have only the 9 verified-allowed keys.
+      - metadata values are strict-typed and bounded (rejects arbitrary objects,
+        long strings, deep nesting).
+
+    Raises RuntimeError if violated. This is the structural enforcement of the
+    "audit logs must contain zero original PII" invariant.
+    """
+    # Top-level keys
+    for k in entry_data:
+        if k not in _ENTRY_ALLOWED_KEYS:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: top-level key {k!r} is not in the "
+                f"allow-list. This guard prevents arbitrary keys (which may "
+                f"contain PII) from being written to audit logs."
+            )
+
+    # entity_details
     details = entry_data.get("entity_details") or []
     for i, detail in enumerate(details):
         if not isinstance(detail, dict):
-            continue
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: entity_details[{i}] is not a dict "
+                f"(got {type(detail).__name__})."
+            )
+        # Check the legacy denylist FIRST so known-PII keys produce the
+        # recognizable "COMPLIANCE VIOLATION" error message before falling
+        # through to the more general allow-list rejection.
         for forbidden in _PII_FORBIDDEN_KEYS:
             if forbidden in detail:
                 raise RuntimeError(
-                    f"COMPLIANCE VIOLATION: entity_details[{i}] contains forbidden "
-                    f"field '{forbidden}'. Audit logs must not contain original PII."
+                    f"COMPLIANCE VIOLATION: entity_details[{i}] contains "
+                    f"forbidden field {forbidden!r}. Audit logs must not "
+                    f"contain original PII."
                 )
+        for k in detail:
+            if k not in _ENTITY_DETAIL_ALLOWED_KEYS:
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: entity_details[{i}] contains "
+                    f"disallowed key {k!r}. Allowed keys: "
+                    f"{sorted(_ENTITY_DETAIL_ALLOWED_KEYS)}."
+                )
+
+    # metadata
+    metadata = entry_data.get("metadata") or {}
+    if metadata:
+        if not isinstance(metadata, dict):
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: metadata must be a dict "
+                f"(got {type(metadata).__name__})."
+            )
+        for k, v in metadata.items():
+            if not isinstance(k, str):
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: metadata key {k!r} must be a string."
+                )
+            _validate_metadata_value(v, depth=1, path=f".{k}")
+
+
+def _assert_no_pii_in_entry(entry_data: dict) -> None:
+    """
+    Deprecated (v0.6.1): kept as an alias for backward compat.
+    Use `_validate_audit_entry_schema` instead.
+    """
+    _validate_audit_entry_schema(entry_data)
 
 
 @dataclass
@@ -153,10 +272,18 @@ class AuditLogger:
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
     @staticmethod
-    def _compute_hash(data: dict) -> str:
-        """Compute SHA-256 hash of entry data."""
-        # Deterministic serialization: sort keys, no spaces
-        canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
+    def _compute_hash(data: dict, *, legacy_canonical: bool = False) -> str:
+        """
+        Compute SHA-256 hash of entry data.
+
+        Args:
+            data: The audit-entry dict to hash.
+            legacy_canonical: When True, use the v0.6.0-compatible canonicalizer
+                (ensure_ascii=True). Used ONLY by verify_chain when the caller
+                opts in to verifying a pre-v0.6.1 chain. Sunset in v0.7.0.
+        """
+        encoder = _legacy_canonical_json if legacy_canonical else canonical_json
+        canonical = encoder(data)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def log(
@@ -219,8 +346,10 @@ class AuditLogger:
                 entry_data["article_ref"] = ["EU_AI_Act_Art_12", "EU_AI_Act_Art_19"]
                 entry_data["retention_hint_days"] = self.config.retention_hint_days
                 entry_data["pii_in_log"] = False
-                # Runtime invariant: no PII may leak into entity_details
-                _assert_no_pii_in_entry(entry_data)
+
+            # v0.6.1 B3: ALWAYS-ON allow-list schema validation. The no-PII-in-logs
+            # invariant is a project-wide guarantee, not a compliance-mode feature.
+            _validate_audit_entry_schema(entry_data)
 
             # Compute entry hash (includes prev_hash for chain integrity)
             entry_hash = self._compute_hash(entry_data)
@@ -240,6 +369,8 @@ class AuditLogger:
         self,
         log_file: Optional[Path] = None,
         output_format: Optional[str] = None,
+        *,
+        legacy_canonical: bool = False,
     ):
         """
         Verify the integrity of the entire audit chain.
@@ -250,10 +381,22 @@ class AuditLogger:
                 (is_valid, errors, final_seq) tuple — backward compatible.
                 When "compliance_report", returns a structured dict with
                 period, totals, category aggregates, and verdict.
+            legacy_canonical: When True, recompute hashes using the v0.6.0
+                canonicalizer (`ensure_ascii=True`). Use this to verify audit
+                chains written by CloakLLM v0.5.x or v0.6.0 that contain
+                non-ASCII characters. Sunset in v0.7.0.
 
         Returns (is_valid, errors, final_seq) by default, or a dict
         when output_format="compliance_report".
         """
+        if legacy_canonical:
+            import warnings as _w
+            _w.warn(
+                "legacy_canonical=True is a backward-compat shim for v0.5.x / "
+                "v0.6.0 audit chains and will be removed in v0.7.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         errors: list[str] = []
         final_seq = 0
 
@@ -345,9 +488,9 @@ class AuditLogger:
                                 pii_categories_detected.get(cat, 0) + count
                             )
 
-                    # Recompute entry hash
+                    # Recompute entry hash (legacy_canonical thread-through)
                     stored_hash = entry.pop("entry_hash", "")
-                    recomputed = self._compute_hash(entry)
+                    recomputed = self._compute_hash(entry, legacy_canonical=legacy_canonical)
                     if stored_hash != recomputed:
                         errors.append(
                             f"{fpath.name}:{line_num} seq={entry.get('seq')} — "

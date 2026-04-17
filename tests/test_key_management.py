@@ -126,6 +126,50 @@ def test_hashicorp_vault_raises_import_error_when_sdk_missing():
             HashicorpVaultProvider(key_id="my-transit-key")
 
 
+# --- B2 partial: KMS providers raise NotImplementedError on use (v0.6.1) ----
+
+
+def _stub_sdks_for_kms():
+    """Provide minimal stub modules so KMS classes can __init__ without real SDKs.
+
+    The whole point of the v0.6.1 disable is that operations raise; we still
+    need to construct an instance to test that.
+    """
+    import sys
+    import types
+
+    if "boto3" not in sys.modules:
+        boto3_stub = types.ModuleType("boto3")
+        boto3_stub.client = lambda *args, **kwargs: object()
+        sys.modules["boto3"] = boto3_stub
+
+
+def test_aws_kms_sign_raises_not_implemented_v061():
+    _stub_sdks_for_kms()
+    from cloakllm.key_provider import AwsKmsKeyProvider
+    p = AwsKmsKeyProvider(key_id="arn:aws:kms:eu-west-1:123:key/abc")
+    with pytest.raises(NotImplementedError, match="EXPERIMENTAL"):
+        p.sign(b"data")
+
+
+def test_aws_kms_public_key_raises_not_implemented_v061():
+    _stub_sdks_for_kms()
+    from cloakllm.key_provider import AwsKmsKeyProvider
+    p = AwsKmsKeyProvider(key_id="arn:aws:kms:eu-west-1:123:key/abc")
+    with pytest.raises(NotImplementedError, match="v0.7"):
+        _ = p.public_key_b64
+
+
+def test_local_key_provider_still_works_after_kms_disable():
+    """B2 disabling KMS providers must NOT affect LocalKeyProvider."""
+    kp = DeploymentKeyPair.generate()
+    provider = LocalKeyProvider(kp)
+    sig = provider.sign(b"data")
+    assert isinstance(sig, bytes)
+    assert len(sig) == 64
+    assert isinstance(provider.public_key_b64, str)
+
+
 # --- Key rotation event ------------------------------------------------------
 
 

@@ -163,6 +163,14 @@ class ShieldConfig:
         default_factory=lambda: os.getenv("CLOAKLLM_KEY_ROTATION", "false").lower() == "true"
     )
 
+    # --- Input length cap (v0.6.1 H1.4) ---
+    # Hard cap on text length passed to detection backends. Prevents pathological
+    # inputs from exercising worst-case backtracking on built-in patterns.
+    # Default: 1 MB. Set to 0 to disable (not recommended).
+    max_input_length: int = field(
+        default_factory=lambda: int(os.getenv("CLOAKLLM_MAX_INPUT_LENGTH", "1000000"))
+    )
+
     # --- LiteLLM Integration ---
     # Auto-sanitize on request, auto-desanitize on response
     auto_mode: bool = True
@@ -194,6 +202,11 @@ class ShieldConfig:
         if self.attestation_key_provider and not self.attestation_key_id:
             raise ValueError(
                 f"attestation_key_id is required when attestation_key_provider='{self.attestation_key_provider}'."
+            )
+        # v0.6.1 H1.4 — input length cap validation
+        if self.max_input_length < 0:
+            raise ValueError(
+                f"max_input_length must be >= 0 (got {self.max_input_length})."
             )
         from cloakllm.token_spec import validate_category_name, RESERVED_CATEGORIES
         for name, _desc in self.custom_llm_categories:

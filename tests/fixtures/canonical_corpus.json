@@ -1,0 +1,74 @@
+[
+  {
+    "name": "ascii_simple",
+    "input": {"a": 1, "b": "hello"},
+    "expected": "{\"a\":1,\"b\":\"hello\"}"
+  },
+  {
+    "name": "key_sort_lexicographic",
+    "input": {"zebra": 1, "apple": 2, "mango": 3},
+    "expected": "{\"apple\":2,\"mango\":3,\"zebra\":1}"
+  },
+  {
+    "name": "numeric_string_keys_lexicographic",
+    "input": {"10": "x", "2": "y", "1": "z"},
+    "expected": "{\"1\":\"z\",\"10\":\"x\",\"2\":\"y\"}"
+  },
+  {
+    "name": "non_ascii_value",
+    "input": {"name": "café"},
+    "expected": "{\"name\":\"café\"}"
+  },
+  {
+    "name": "non_ascii_key",
+    "input": {"日本": 1, "ascii": 2},
+    "expected": "{\"ascii\":2,\"日本\":1}"
+  },
+  {
+    "name": "nested_object",
+    "input": {"outer": {"inner_b": 2, "inner_a": 1}},
+    "expected": "{\"outer\":{\"inner_a\":1,\"inner_b\":2}}"
+  },
+  {
+    "name": "nested_array_of_objects",
+    "input": {"items": [{"b": 1, "a": 2}, {"d": 3, "c": 4}]},
+    "expected": "{\"items\":[{\"a\":2,\"b\":1},{\"c\":4,\"d\":3}]}"
+  },
+  {
+    "name": "null_and_booleans",
+    "input": {"n": null, "t": true, "f": false},
+    "expected": "{\"f\":false,\"n\":null,\"t\":true}"
+  },
+  {
+    "name": "integer_zero_and_negative",
+    "input": {"z": 0, "neg": -5},
+    "expected": "{\"neg\":-5,\"z\":0}"
+  },
+  {
+    "name": "string_with_escapes",
+    "input": {"s": "line1\nline2\t\"quoted\""},
+    "expected": "{\"s\":\"line1\\nline2\\t\\\"quoted\\\"\"}"
+  },
+  {
+    "name": "compliance_entry_shape",
+    "input": {
+      "seq": 0,
+      "event_type": "sanitize",
+      "categories": {"EMAIL": 1, "PERSON_日本": 2},
+      "compliance_version": "eu_ai_act_article12_v1",
+      "article_ref": ["EU_AI_Act_Art_12", "EU_AI_Act_Art_19"],
+      "pii_in_log": false
+    },
+    "expected": "{\"article_ref\":[\"EU_AI_Act_Art_12\",\"EU_AI_Act_Art_19\"],\"categories\":{\"EMAIL\":1,\"PERSON_日本\":2},\"compliance_version\":\"eu_ai_act_article12_v1\",\"event_type\":\"sanitize\",\"pii_in_log\":false,\"seq\":0}"
+  },
+  {
+    "name": "empty_object",
+    "input": {},
+    "expected": "{}"
+  },
+  {
+    "name": "empty_array",
+    "input": {"arr": []},
+    "expected": "{\"arr\":[]}"
+  }
+]

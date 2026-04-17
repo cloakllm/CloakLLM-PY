@@ -33,7 +33,13 @@ class RegexBackend(DetectorBackend):
 
     @staticmethod
     def _test_regex_safety(regex: re.Pattern) -> bool:
-        """Test if a regex is safe from catastrophic backtracking."""
+        """Test if a regex is safe from catastrophic backtracking.
+
+        v0.6.1 H1.2: expanded corpus to exercise the patterns most prone to
+        nested-quantifier blowup (long digit runs, mixed alphanumeric, IBAN-
+        and JWT-style strings). Threshold raised from 20ms to 100ms because
+        the corpus is bigger; per-pattern timeout via wall clock.
+        """
         import time
         test_inputs = [
             'a' * 25 + '!',
@@ -41,11 +47,17 @@ class RegexBackend(DetectorBackend):
             ' ' * 25 + '!',
             ('a1 ' * 8) + '!',
             '@' * 25 + '!',
+            # v0.6.1: pathological inputs for the previously-skipped built-ins
+            '1' * 5000,                    # PHONE / locale phones
+            'A1' * 2500,                   # API_KEY / IBAN
+            'AAAA' * 100,                  # IBAN
+            ('1234-' * 1000),              # PHONE separators
+            'sk_' + 'a' * 1000,            # API_KEY long bearer
         ]
         for test_input in test_inputs:
             start = time.monotonic()
             regex.search(test_input)
-            if (time.monotonic() - start) >= 0.02:
+            if (time.monotonic() - start) >= 0.1:
                 return False
         return True
 
@@ -94,12 +106,32 @@ class RegexBackend(DetectorBackend):
             except re.error:
                 pass
 
-        # Built-in patterns third (hardcoded, pre-validated — no safety check needed)
+        # Built-in patterns third.
+        # v0.6.1 H1.1: built-in patterns are now also gated by the safety check
+        # (previously skipped). This caught real bugs in PHONE/IBAN that had
+        # been shipping since v0.1.0.
         for name, (_, pattern) in PATTERNS.items():
-            if pattern_map.get(name, True):
-                self._compiled_patterns.append(
-                    (name, re.compile(pattern))
+            if not pattern_map.get(name, True):
+                continue
+            try:
+                compiled = re.compile(pattern)
+            except re.error as e:
+                warnings.warn(
+                    f"CloakLLM: built-in pattern '{name}' failed to compile: {e}",
+                    RuntimeWarning,
+                    stacklevel=2,
                 )
+                continue
+            if not self._test_regex_safety(compiled):
+                warnings.warn(
+                    f"CloakLLM: built-in pattern '{name}' failed ReDoS safety check "
+                    f"(potential catastrophic backtracking) — skipped. This indicates "
+                    f"a regression. Please file a bug.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                continue
+            self._compiled_patterns.append((name, compiled))
 
     def detect(
         self, text: str, covered_spans: list[tuple[int, int]]

@@ -86,9 +86,16 @@ PATTERNS: dict[str, tuple[str, str]] = {
         r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b"
     ),
     # Phone numbers (international + US formats)
+    # v0.6.1 H1.3: tightened from `(?:\(?\d{2,4}\)?[-.\s]?)?\d{3,4}[-.\s]?\d{3,4}\b`
+    # which had three optional adjacent digit groups → ambiguous parses on long
+    # digit runs. The new pattern:
+    #   - replaces `\b` boundaries with `(?<!\d)` / `(?!\d)` lookarounds (digit-only),
+    #   - makes parenthesized area code REQUIRE both parens, and bare area code
+    #     REQUIRE a trailing separator, eliminating the ambiguity that allowed
+    #     a long digit run to be parsed as area+rest in many ways.
     "PHONE": (
         r"phone",
-        r"(?:\+\d{1,3}[-.\s])?(?:\(?\d{2,4}\)?[-.\s]?)?\d{3,4}[-.\s]?\d{3,4}\b"
+        r"(?<!\d)(?:\+\d{1,3}[-.\s])?(?:\(\d{2,4}\)[-.\s]?|\d{2,4}[-.\s])?\d{3,4}[-.\s]?\d{3,4}(?!\d)"
     ),
     # IP addresses (IPv4)
     "IP_ADDRESS": (
@@ -96,9 +103,13 @@ PATTERNS: dict[str, tuple[str, str]] = {
         r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b"
     ),
     # API keys / tokens (high-entropy strings, common patterns)
+    # v0.6.1 F1: bounded upper at 512 to limit ReDoS exposure. Body now
+    # includes `-` and `_` so multi-segment keys (Anthropic sk-ant-api03-...,
+    # GitHub fine-grained github_pat_X_Y, AWS session tokens) are detected.
+    # Bounded character class — no backtracking risk despite broader match.
     "API_KEY": (
         r"api_key",
-        r"\b(?:sk|pk|api|key|token|secret|bearer)[-_]?[a-zA-Z0-9]{20,}\b"
+        r"\b(?:sk|pk|api|key|token|secret|bearer)[-_]?[a-zA-Z0-9_-]{20,512}\b"
     ),
     # AWS access keys
     "AWS_KEY": (
@@ -111,9 +122,14 @@ PATTERNS: dict[str, tuple[str, str]] = {
         r"\beyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\b"
     ),
     # IBAN (International Bank Account Number)
+    # v0.6.1 H1.3: tightened from `[\s]?[\dA-Z]{4}[\s]?(?:[\dA-Z]{4}[\s]?){2,7}[\dA-Z]{1,4}`
+    # which had trailing-separator ambiguity → catastrophic backtracking on
+    # long alpha-numeric strings. Now: separator moved BEFORE each 4-char
+    # group, eliminating split ambiguity. Matches both compact (DE89370400440532013000)
+    # and spaced (DE89 3704 0044 0532 0130 00) forms.
     "IBAN": (
         r"iban",
-        r"\b[A-Z]{2}\d{2}[\s]?[\dA-Z]{4}[\s]?(?:[\dA-Z]{4}[\s]?){2,7}[\dA-Z]{1,4}\b"
+        r"\b[A-Z]{2}\d{2}(?:[\s]?[\dA-Z]{4}){2,7}(?:[\s]?[\dA-Z]{1,4})?\b"
     ),
     # Israeli ID number (9 digits)
     "IL_ID": (

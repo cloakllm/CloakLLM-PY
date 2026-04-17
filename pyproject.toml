@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cloakllm"
-version = "0.6.0"
+version = "0.6.1"
 description = "AI Compliance Middleware — PII protection, tamper-evident audit logs, and EU AI Act compliance for LLM gateways"
 readme = "README.md"
 license = {text = "MIT"}
@@ -26,17 +26,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-litellm = ["litellm>=1.40.0"]
-attestation = ["pynacl>=1.5.0"]
+# v0.6.1 H6: bumped litellm floor to 1.83.0 (CVE-2026-35029, -35030, GHSA-69x8-hrgq-fjj8 fixed in 1.83.0).
+litellm = ["litellm>=1.83.0,<2.0.0"]
+attestation = ["pynacl>=1.5.0,<2.0.0"]
 kms = [
-    "boto3>=1.28",
-    "google-cloud-kms>=2.20",
-    "azure-keyvault-keys>=4.8",
-    "azure-identity>=1.15",
-    "hvac>=2.0",
+    "boto3>=1.28,<2.0.0",
+    "google-cloud-kms>=2.20,<4.0.0",
+    "azure-keyvault-keys>=4.8,<5.0.0",
+    "azure-identity>=1.15,<2.0.0",
+    "hvac>=2.0,<3.0.0",
 ]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "cryptography>=41.0"]
-all = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
+# v0.6.1 H6: bumped cryptography floor to 46.0.7 (CVE-2026-26007, -34073, -39892 fixed in 46.0.7).
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "cryptography>=46.0.7,<47.0.0", "pip-audit>=2.7"]
+all = ["opentelemetry-api>=1.20,<2.0.0", "opentelemetry-sdk>=1.20,<2.0.0"]
 
 [project.scripts]
 cloakllm = "cloakllm.__main__:main"

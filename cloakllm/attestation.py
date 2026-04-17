@@ -48,10 +48,11 @@ except ImportError:
 
 
 # --- Canonical JSON (must match JS exactly) ---
+# Delegated to cloakllm._canonical for cross-SDK byte-equivalence (v0.6.1+).
+# Pre-v0.6.1 this used `ensure_ascii=True`, which broke verification of any
+# non-ASCII data across SDKs. See `_canonical.py` for details.
 
-def _canonical_json(data: dict) -> str:
-    """Deterministic JSON: sorted keys, compact separators, no floats."""
-    return json.dumps(data, sort_keys=True, separators=(",", ":"))
+from cloakllm._canonical import canonical_json as _canonical_json  # noqa: E402,F401
 
 
 # --- DeploymentKeyPair ---
