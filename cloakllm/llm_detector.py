@@ -79,7 +79,10 @@ class _BoundedCache:
             self._cache.clear()
 
 
-# Private IP ranges for URL validation
+# v0.6.3 H2: SSRF hardening.
+# Private IP ranges that ARE permitted for Ollama (when allow_remote=False, only
+# these are accepted; when allow_remote=True, these are accepted automatically
+# without the warning).
 _PRIVATE_NETWORKS = [
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("10.0.0.0/8"),
@@ -87,40 +90,127 @@ _PRIVATE_NETWORKS = [
     ipaddress.ip_network("192.168.0.0/16"),
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("fc00::/7"),
-    ipaddress.ip_network("fe80::/10"),
+    ipaddress.ip_network("fe80::/10"),  # IPv6 link-local (legitimate same-link Ollama)
+]
+
+# v0.6.3 H2: Networks that MUST be denied even when allow_remote=True.
+# These cover cloud metadata services and other addresses that are never
+# legitimate Ollama hosts and would constitute SSRF if reached.
+_ALWAYS_DENY_NETWORKS = [
+    ipaddress.ip_network("169.254.0.0/16"),    # IPv4 link-local + AWS/GCP/Azure IMDS
+    ipaddress.ip_network("100.64.0.0/10"),     # Carrier-grade NAT (some cloud metadata setups)
+    ipaddress.ip_network("0.0.0.0/8"),         # "this network" — 0.0.0.0 aliases to localhost on Linux
+    ipaddress.ip_network("224.0.0.0/4"),       # IPv4 multicast
+    ipaddress.ip_network("240.0.0.0/4"),       # IPv4 reserved (future use)
+    ipaddress.ip_network("::/128"),            # IPv6 unspecified
+    ipaddress.ip_network("ff00::/8"),          # IPv6 multicast
+    # Note: fe80::/10 (IPv6 link-local) is NOT in deny because legitimate
+    # same-link Ollama uses it. AWS/GCP/Azure don't use IPv6 link-local for IMDS.
 ]
 
 
+def _normalize_ip(ip: ipaddress._BaseAddress) -> ipaddress._BaseAddress:
+    """v0.6.3 H2: Unwrap IPv4-mapped IPv6 (`::ffff:x.y.z.w`) to its IPv4 form
+    so range checks against IPv4 deny lists still apply.
+
+    Without this, an attacker could bypass an IPv4 deny by writing the same
+    address as `::ffff:169.254.169.254`.
+    """
+    if isinstance(ip, ipaddress.IPv6Address):
+        v4 = ip.ipv4_mapped
+        if v4 is not None:
+            return v4
+    return ip
+
+
+def _check_ip_allowed(ip_str: str, allow_remote: bool) -> bool:
+    """v0.6.3 H2: Single source of truth for whether a resolved IP is reachable.
+
+    Order of checks matters:
+    1. ALWAYS_DENY wins regardless of allow_remote (cloud metadata, multicast,
+       unspecified). This is the protection that survives `allow_remote=True`.
+    2. PRIVATE networks are always allowed (loopback, RFC1918, IPv6 ULA/link-local).
+    3. Anything else requires `allow_remote=True`.
+    """
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return False
+    ip = _normalize_ip(ip)
+    if any(ip in net for net in _ALWAYS_DENY_NETWORKS):
+        return False
+    if any(ip in net for net in _PRIVATE_NETWORKS):
+        return True
+    return bool(allow_remote)
+
+
 def _validate_ollama_url(url: str, allow_remote: bool) -> str:
-    """Validate that the Ollama URL points to a local/private address."""
+    """v0.6.3 H2: Validate that the Ollama URL is safe to contact.
+
+    No fast-path string bypass: we always resolve the hostname so that
+    `localhost` (which an /etc/hosts override could redirect) and
+    integer/octal IPv4 forms (`http://2130706433/`) go through the same
+    `_check_ip_allowed` filter as any other input.
+
+    All resolved addresses must pass — if a hostname returns both an
+    allowed and a denied IP, the request is rejected (the underlying
+    HTTP client may pick either, so we fail closed).
+    """
     parsed = urllib.parse.urlparse(url)
     hostname = parsed.hostname or ""
-
-    # Fast path for common localhost names
-    if hostname in ("localhost", "127.0.0.1", "::1"):
-        return url
+    if not hostname:
+        raise ValueError(
+            f"CloakLLM: Ollama URL '{url}' has no hostname."
+        )
 
     try:
         infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-        for _family, _type, _proto, _canonname, sockaddr in infos:
-            ip = ipaddress.ip_address(sockaddr[0])
-            if any(ip in net for net in _PRIVATE_NETWORKS):
-                return url
-    except (socket.gaierror, ValueError, OSError):
-        pass
-
-    if allow_remote:
+    except (socket.gaierror, OSError) as exc:
+        if not allow_remote:
+            raise ValueError(
+                f"CloakLLM: Cannot resolve Ollama hostname '{hostname}' ({exc}). "
+                f"Set llm_allow_remote=True only if you accept that re-resolution "
+                f"happens at fetch time."
+            ) from exc
+        # allow_remote=True: defer to fetch-time re-validation. The actual
+        # connect will succeed or fail; either way, the deny list is checked
+        # again before the request is issued.
         logger.warning(
-            "CloakLLM: Ollama URL '%s' points to a non-local address. "
-            "PII data will be sent to this remote server.", url
+            "CloakLLM: Cannot resolve Ollama hostname '%s' at validation time "
+            "(%s). Will re-check at fetch time.", hostname, exc
         )
         return url
 
-    raise ValueError(
-        f"CloakLLM: Ollama URL '{url}' points to a non-local address. "
-        f"Set llm_allow_remote=True to allow remote Ollama instances. "
-        f"WARNING: PII data will be sent to the remote server."
-    )
+    if not infos:
+        raise ValueError(
+            f"CloakLLM: Hostname '{hostname}' returned no addresses."
+        )
+
+    for _family, _type, _proto, _canonname, sockaddr in infos:
+        ip_str = sockaddr[0]
+        if not _check_ip_allowed(ip_str, allow_remote):
+            raise ValueError(
+                f"CloakLLM: Ollama URL '{url}' resolves to '{ip_str}', which "
+                f"is denied (cloud metadata service, multicast, or non-private "
+                f"address without llm_allow_remote=True). This protects against "
+                f"SSRF to cloud metadata endpoints (169.254.169.254 etc.) even "
+                f"when remote Ollama is enabled."
+            )
+
+    if allow_remote:
+        # All resolved IPs are non-deny but at least one is non-private.
+        # Warn so operators know PII goes off-host.
+        for _f, _t, _p, _c, sockaddr in infos:
+            ip = _normalize_ip(ipaddress.ip_address(sockaddr[0]))
+            if not any(ip in net for net in _PRIVATE_NETWORKS):
+                logger.warning(
+                    "CloakLLM: Ollama URL '%s' points to a non-local address "
+                    "(%s). PII data will be sent to this remote server.",
+                    url, sockaddr[0],
+                )
+                break
+
+    return url
 
 
 _LOCALE_HINTS = {
@@ -145,25 +235,28 @@ class LlmDetector:
 
     def __init__(self, config: ShieldConfig):
         self._model = config.llm_model
-        # F2.1 (v0.6.1): SSRF hardening lands in v0.6.2. Until then, warn loudly
-        # whenever llm_allow_remote=True is set — the validator currently has
-        # known bypass paths (DNS rebinding, integer/octal IPv4, IPv4-mapped
-        # IPv6 metadata IPs).
-        _allow_remote = getattr(config, 'llm_allow_remote', False)
-        if _allow_remote:
+        # v0.6.3 H2: SSRF hardening landed. The bypass paths from v0.6.x
+        # (DNS rebinding, integer/octal IPv4, IPv4-mapped IPv6 metadata IPs)
+        # are now closed by `_validate_ollama_url` (init-time deny+unwrap),
+        # `_revalidate_url` (fetch-time re-resolve), and the always-deny
+        # network list (cloud metadata blocked even when allow_remote=True).
+        # We still warn on allow_remote=True so the operational risk of
+        # sending PII off-host is visible.
+        self._allow_remote = bool(getattr(config, 'llm_allow_remote', False))
+        if self._allow_remote:
             import warnings as _w
             _w.warn(
-                "llm_allow_remote=True has known SSRF bypass paths in v0.6.x "
-                "(DNS rebinding, integer/octal IPv4, IPv4-mapped IPv6 metadata "
-                "addresses). Do NOT use in production until the v0.6.2 SSRF "
-                "hardening lands. Tracking: "
-                "https://github.com/cloakllm/CloakLLM-PY/issues/ssrf-hardening",
+                "llm_allow_remote=True: PII data will be transmitted to a "
+                "non-local Ollama instance. Cloud metadata addresses "
+                "(169.254.169.254 etc.) and other always-deny ranges are still "
+                "blocked, but you must trust the remote endpoint with your input "
+                "text. Prefer running Ollama locally.",
                 RuntimeWarning,
                 stacklevel=2,
             )
         self._base_url = _validate_ollama_url(
             config.llm_ollama_url.rstrip("/"),
-            _allow_remote,
+            self._allow_remote,
         )
         self._timeout = config.llm_timeout
         self._confidence = config.llm_confidence
@@ -187,11 +280,26 @@ class LlmDetector:
     def _effective_categories(self) -> frozenset[str]:
         return LLM_CATEGORIES | frozenset(self._custom_categories)
 
+    def _revalidate_url(self) -> None:
+        """v0.6.3 H2: Re-resolve the base URL's hostname and apply the same
+        deny/private-IP checks as init-time validation.
+
+        Closes the DNS rebinding window: an attacker who pointed
+        `ollama.example.com` at a private/allowed IP at init time can't flip
+        their authoritative DNS to `169.254.169.254` before the actual fetch.
+
+        On failure, raises `ValueError` — callers (`_check_available`,
+        `_query_ollama`) catch and treat as "Ollama unavailable" to keep the
+        detector fail-soft (consistent with regex/NER passes still running).
+        """
+        _validate_ollama_url(self._base_url, self._allow_remote)
+
     def _check_available(self) -> bool:
         """Ping Ollama. Cache result so we only check once."""
         if self._available is not None:
             return self._available
         try:
+            self._revalidate_url()  # v0.6.3 H2: DNS rebinding mitigation
             req = urllib.request.Request(f"{self._base_url}/api/tags", method="GET")
             urllib.request.urlopen(req, timeout=3)
             self._available = True
@@ -250,6 +358,7 @@ class LlmDetector:
         )
 
         try:
+            self._revalidate_url()  # v0.6.3 H2: DNS rebinding mitigation
             resp = urllib.request.urlopen(req, timeout=self._timeout)
             body = json.loads(resp.read())
             content = body.get("message", {}).get("content", "{}")
@@ -258,7 +367,7 @@ class LlmDetector:
             if not isinstance(entities, list):
                 return []
             return entities
-        except (urllib.error.URLError, json.JSONDecodeError, KeyError, TimeoutError, OSError) as exc:
+        except (urllib.error.URLError, json.JSONDecodeError, KeyError, TimeoutError, OSError, ValueError) as exc:
             logger.warning("Ollama query failed: %s", exc)
             return []
 
