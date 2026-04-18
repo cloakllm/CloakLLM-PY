@@ -435,19 +435,36 @@ class Shield:
         """
         start_time = time.perf_counter()
 
+        # v0.6.3 H3: Compute the union of tokens that appear across the batch.
+        # See `desanitize` for the full rationale — same disclosure-oracle fix.
+        all_text = "\n".join(texts)
+        present_tokens = sorted(
+            t for t in token_map.reverse.keys() if t in all_text
+        )
+
         t0 = time.perf_counter()
         results = [self.tokenizer.detokenize(text, token_map) for text in texts]
         tokenization_ms = (time.perf_counter() - t0) * 1000
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000
 
+        # v0.6.3 H3: bucket timing in audit log; full precision in .metrics().
+        def _bucket_ms(ms: float) -> float:
+            return round(ms / 10.0) * 10.0
+
         timing = {
-            "total_ms": round(elapsed_ms, 2),
-            "tokenization_ms": round(tokenization_ms, 2),
+            "total_ms": _bucket_ms(elapsed_ms),
+            "tokenization_ms": _bucket_ms(tokenization_ms),
         }
 
-        # Accumulate metrics
+        # Accumulate metrics (full precision — internal use only)
         self._accumulate_metrics("desanitize_batch", elapsed_ms, {}, tokenization_ms, 0, {})
+
+        present_token_set = set(present_tokens)
+        present_entity_details = [
+            ed for ed in (token_map.entity_details or [])
+            if ed.get("token") in present_token_set
+        ]
 
         self.audit.log(
             event_type="desanitize_batch",
@@ -455,12 +472,12 @@ class Shield:
             sanitized_text="",
             model=model,
             provider=provider,
-            entity_count=token_map.entity_count,
+            entity_count=len(present_tokens),  # H3
             categories=token_map.categories,
-            tokens_used=list(token_map.reverse.keys()),
-            latency_ms=elapsed_ms,
+            tokens_used=present_tokens,  # H3
+            latency_ms=_bucket_ms(elapsed_ms),  # H3
             mode=self.config.mode,
-            entity_details=token_map.entity_details,
+            entity_details=present_entity_details,  # H3
             timing=timing,
             metadata=metadata,
         )
@@ -490,19 +507,46 @@ class Shield:
         """
         start_time = time.perf_counter()
 
+        # v0.6.3 H3: Pre-compute which tokens actually appear in `text`. Used
+        # below to log only the subset to audit (was: the full map). Closes
+        # the desanitize-time disclosure oracle: an audit-log reader who saw
+        # `tokens_used` on every desanitize call could enumerate the entire
+        # session's token inventory from a single entry, even though the
+        # matching sanitize entry already logged that information.
+        present_tokens = sorted(
+            t for t in token_map.reverse.keys() if t in text
+        )
+
         t0 = time.perf_counter()
         result = self.tokenizer.detokenize(text, token_map)
         tokenization_ms = (time.perf_counter() - t0) * 1000
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000
 
+        # v0.6.3 H3: Bucket timing in audit logs to 10 ms granularity.
+        # Microsecond precision lets an audit-log reader correlate
+        # "which tokens were processed" with timing variance — a side-channel
+        # for token presence. The internal .metrics() API still gets the
+        # full-precision values for performance debugging.
+        def _bucket_ms(ms: float) -> float:
+            return round(ms / 10.0) * 10.0
+
         timing = {
-            "total_ms": round(elapsed_ms, 2),
-            "tokenization_ms": round(tokenization_ms, 2),
+            "total_ms": _bucket_ms(elapsed_ms),
+            "tokenization_ms": _bucket_ms(tokenization_ms),
         }
 
-        # Accumulate metrics
+        # Accumulate metrics (full precision — internal use only)
         self._accumulate_metrics("desanitize", elapsed_ms, {}, tokenization_ms, 0, {})
+
+        # v0.6.3 H3: entity_details filtered to the present subset (mirrors
+        # the tokens_used filter). Categories are kept at the map level —
+        # they're already in the matching sanitize entry, so no new leak.
+        present_token_set = set(present_tokens)
+        present_entity_details = [
+            ed for ed in (token_map.entity_details or [])
+            if ed.get("token") in present_token_set
+        ]
 
         # Audit log
         self.audit.log(
@@ -511,12 +555,12 @@ class Shield:
             sanitized_text=result,
             model=model,
             provider=provider,
-            entity_count=token_map.entity_count,
+            entity_count=len(present_tokens),  # H3: count of tokens in this call
             categories=token_map.categories,
-            tokens_used=list(token_map.reverse.keys()),
-            latency_ms=elapsed_ms,
+            tokens_used=present_tokens,  # H3: subset present in input, not full map
+            latency_ms=_bucket_ms(elapsed_ms),  # H3: bucketed (timing oracle)
             mode=self.config.mode,
-            entity_details=token_map.entity_details,
+            entity_details=present_entity_details,  # H3: subset filter
             timing=timing,
             metadata=metadata,
         )
