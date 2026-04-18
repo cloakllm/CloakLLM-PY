@@ -29,6 +29,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # v0.6.3 P0-1: GitHub-hosted runners ship with pip 25.2 which has known
+      # CVEs (CVE-2025-8869 fixed in 25.3, CVE-2026-1703 fixed in 26.0). Upgrade
+      # before pip-audit runs.
+      - name: Upgrade pip
+        run: pip install --upgrade pip
+
       - name: Install dependencies
         run: pip install -e ".[dev,litellm]"
 
@@ -38,10 +44,12 @@ jobs:
       - name: Run tests
         run: pytest tests/ -v
 
-      # v0.6.1 H6: scan installed deps for known CVEs each CI run.
+      # v0.6.3 NEW-9: dep CVE audit is now BLOCKING (was continue-on-error).
+      # If a transitive CVE without an upstream fix appears, add `--ignore-vuln <ID>`
+      # below with a dated comment naming the CVE and the reason for the exception.
+      # All exemptions tracked in SECURITY_WAIVERS.md.
       - name: Audit dependencies (pip-audit)
-        run: pip-audit
-        continue-on-error: true
-        # NOTE: pip-audit failures are non-fatal until v0.7 to avoid breaking
-        # CI on transitive dep CVEs we cannot immediately patch. Operators
-        # should monitor the output and pin/upgrade as needed.
+        run: |
+          pip-audit \
+            --ignore-vuln ECHO-ffe1-1d3c-d9bc \
+            --ignore-vuln ECHO-7db2-03aa-5591

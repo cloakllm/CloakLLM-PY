@@ -25,6 +25,7 @@ How it works:
 from __future__ import annotations
 
 import threading
+import time
 import uuid
 from typing import Any, Optional
 
@@ -171,9 +172,14 @@ def enable(config: Optional[ShieldConfig] = None):
 
             # Handle streaming responses
             if stream and call_key and not _should_skip(model):
-                stream_key = call_key
-                call_key = ""  # stream wrapper owns cleanup
-                return _sync_litellm_stream_wrapper(response, model, stream_key)
+                # v0.6.3 P0-2: pop token_map + capture _shield SYNCHRONOUSLY
+                # before returning the lazy stream wrapper. Eliminates the
+                # disable()-mid-stream race that would silently drop the
+                # Article 12 audit entry.
+                stream_token_map = _pop_token_map(call_key)
+                stream_shield = _shield
+                call_key = ""
+                return _sync_litellm_stream_wrapper(response, model, stream_token_map, stream_shield)
 
             # Desanitize all choices with the SAME token map (pop once)
             if not _should_skip(model) and call_key and hasattr(response, "choices"):
@@ -209,9 +215,11 @@ def enable(config: Optional[ShieldConfig] = None):
 
             # Handle streaming responses
             if stream and call_key and not _should_skip(model):
-                stream_key = call_key
-                call_key = ""  # stream wrapper owns cleanup
-                return _async_litellm_stream_wrapper(response, model, stream_key)
+                # v0.6.3 P0-2: same as sync path — synchronous pop + capture.
+                stream_token_map = _pop_token_map(call_key)
+                stream_shield = _shield
+                call_key = ""
+                return _async_litellm_stream_wrapper(response, model, stream_token_map, stream_shield)
 
             # Desanitize all choices with the SAME token map (pop once)
             if not _should_skip(model) and call_key and hasattr(response, "choices"):
@@ -274,18 +282,75 @@ def disable():
     print("🛡️  CloakLLM disabled")
 
 
-def _sync_litellm_stream_wrapper(stream, model: str, call_key: str):
-    """Wrap a sync LiteLLM streaming response with incremental desanitization."""
+import logging as _logging
+_audit_logger = _logging.getLogger("cloakllm.audit")
+_audit_failure_warned_once = False  # P0-4: warn once per process about audit failures
+
+
+def _stream_audit_log(token_map, model, desan, start_perf, stream_error, shield_local):
+    """v0.6.3 (NEW-3 / P0-2 / P0-4): write a single desanitize_stream audit
+    entry per stream lifecycle. `shield_local` captured at wrapper-construction
+    time prevents disable()-mid-stream Article 12 gaps. Audit failure logged
+    via WARNING (not silently swallowed), but never breaks the stream.
+    """
+    if shield_local is None or shield_local.audit is None:
+        return
+    elapsed_ms = (time.perf_counter() - start_perf) * 1000
+    metadata = {"chars_processed": int(getattr(desan, "chars_processed", 0))}
+    if stream_error is not None:
+        metadata["stream_error"] = True
+        metadata["error_type"] = type(stream_error).__name__
     try:
-        token_map = _pop_token_map(call_key)
+        shield_local.audit.log(
+            event_type="desanitize_stream",
+            entity_count=token_map.entity_count if token_map else 0,
+            categories=dict(token_map.categories) if token_map else {},
+            tokens_used=list(token_map.reverse.keys()) if token_map else [],
+            latency_ms=elapsed_ms,
+            mode=token_map.mode if token_map else None,
+            entity_details=token_map.entity_details if token_map else [],
+            model=model,
+            metadata=metadata,
+        )
+    except Exception as e:
+        global _audit_failure_warned_once
+        if not _audit_failure_warned_once:
+            _audit_failure_warned_once = True
+            _audit_logger.warning(
+                "CloakLLM audit log write failed in litellm stream wrapper: %s. "
+                "All subsequent failures of this kind will be silenced. "
+                "Investigate disk space, permissions, or audit chain integrity.",
+                type(e).__name__,
+            )
 
-        if not token_map or token_map.entity_count == 0:
+
+class _NoOpDesan:
+    """Stand-in for StreamDesanitizer when there's no PII to desanitize."""
+    chars_processed = 0
+
+
+def _sync_litellm_stream_wrapper(stream, model: str, token_map, shield_local):
+    """Wrap a sync LiteLLM streaming response with incremental desanitization.
+
+    v0.6.3 P0-2: token_map and shield_local passed in (popped/captured by outer).
+    """
+    # P2-3: even when entity_count == 0, write a desanitize_stream audit entry.
+    if not token_map or token_map.entity_count == 0:
+        start_perf = time.perf_counter()
+        try:
             yield from stream
-            return
+        finally:
+            _stream_audit_log(token_map, model, _NoOpDesan(), start_perf, None, shield_local)
+        return
 
-        desan = StreamDesanitizer(token_map)
-        last_chunk = None
+    # v0.6.3 NEW-3.e
+    max_in = getattr(shield_local.config, "max_input_length", 0) if shield_local else 0
+    desan = StreamDesanitizer(token_map, max_input_length=max_in)
+    last_chunk = None
+    start_perf = time.perf_counter()
+    stream_error = None
 
+    try:
         for chunk in stream:
             last_chunk = chunk
             if hasattr(chunk, "choices") and chunk.choices:
@@ -312,24 +377,34 @@ def _sync_litellm_stream_wrapper(stream, model: str, call_key: str):
         if flushed and last_chunk:
             last_chunk.choices[0].delta.content = flushed
             yield last_chunk
+    except Exception as e:
+        stream_error = e
+        raise
     finally:
-        with _maps_lock:
-            _active_maps.pop(call_key, None)
+        # v0.6.3 NEW-3
+        _stream_audit_log(token_map, model, desan, start_perf, stream_error, shield_local)
 
 
-async def _async_litellm_stream_wrapper(stream, model: str, call_key: str):
-    """Wrap an async LiteLLM streaming response with incremental desanitization."""
-    try:
-        token_map = _pop_token_map(call_key)
-
-        if not token_map or token_map.entity_count == 0:
+async def _async_litellm_stream_wrapper(stream, model: str, token_map, shield_local):
+    """Async mirror. Same P0-2 guarantees."""
+    # P2-3
+    if not token_map or token_map.entity_count == 0:
+        start_perf = time.perf_counter()
+        try:
             async for chunk in stream:
                 yield chunk
-            return
+        finally:
+            _stream_audit_log(token_map, model, _NoOpDesan(), start_perf, None, shield_local)
+        return
 
-        desan = StreamDesanitizer(token_map)
-        last_chunk = None
+    # v0.6.3 NEW-3.e
+    max_in = getattr(shield_local.config, "max_input_length", 0) if shield_local else 0
+    desan = StreamDesanitizer(token_map, max_input_length=max_in)
+    last_chunk = None
+    start_perf = time.perf_counter()
+    stream_error = None
 
+    try:
         async for chunk in stream:
             last_chunk = chunk
             if hasattr(chunk, "choices") and chunk.choices:
@@ -356,9 +431,12 @@ async def _async_litellm_stream_wrapper(stream, model: str, call_key: str):
         if flushed and last_chunk:
             last_chunk.choices[0].delta.content = flushed
             yield last_chunk
+    except Exception as e:
+        stream_error = e
+        raise
     finally:
-        with _maps_lock:
-            _active_maps.pop(call_key, None)
+        # v0.6.3 NEW-3
+        _stream_audit_log(token_map, model, desan, start_perf, stream_error, shield_local)
 
 
 def get_shield() -> Optional[Shield]:

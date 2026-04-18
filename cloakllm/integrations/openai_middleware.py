@@ -29,6 +29,7 @@ How it works:
 from __future__ import annotations
 
 import threading
+import time
 import uuid
 from typing import Any, Optional
 
@@ -191,9 +192,17 @@ def enable(client: Any, config: Optional[ShieldConfig] = None):
                 response = await original_create(*args, **kwargs)
 
                 if stream and call_key and not _should_skip(model):
-                    stream_key = call_key
-                    call_key = ""  # stream wrapper owns cleanup
-                    return _async_stream_wrapper(response, model, stream_key)
+                    # v0.6.3 P0-2: pop token_map AND capture _shield reference
+                    # SYNCHRONOUSLY before returning the lazy stream wrapper.
+                    # Otherwise a concurrent disable() between this point and
+                    # the consumer's first .next() call would clear _active_maps
+                    # AND null _shield — re-opening the Article 12 gap NEW-3
+                    # was supposed to close.
+                    with _maps_lock:
+                        stream_token_map = _active_maps.pop(call_key, None)
+                    stream_shield = _shield  # capture before potential disable()
+                    call_key = ""  # consumed
+                    return _async_stream_wrapper(response, model, stream_token_map, stream_shield)
 
                 if call_key and not _should_skip(model) and hasattr(response, "choices"):
                     with _maps_lock:
@@ -235,9 +244,12 @@ def enable(client: Any, config: Optional[ShieldConfig] = None):
                 response = original_create(*args, **kwargs)
 
                 if stream and call_key and not _should_skip(model):
-                    stream_key = call_key
-                    call_key = ""  # stream wrapper owns cleanup
-                    return _sync_stream_wrapper(response, model, stream_key)
+                    # v0.6.3 P0-2: same as async path — pop synchronously.
+                    with _maps_lock:
+                        stream_token_map = _active_maps.pop(call_key, None)
+                    stream_shield = _shield
+                    call_key = ""
+                    return _sync_stream_wrapper(response, model, stream_token_map, stream_shield)
 
                 if call_key and not _should_skip(model) and hasattr(response, "choices"):
                     with _maps_lock:
@@ -308,19 +320,83 @@ def _is_async_client(client: Any) -> bool:
     return "Async" in cls_name
 
 
-def _sync_stream_wrapper(stream, model: str, call_key: str):
-    """Wrap a sync streaming response: incrementally desanitize tokens as they arrive."""
+import logging as _logging
+_audit_logger = _logging.getLogger("cloakllm.audit")
+_audit_failure_warned_once = False  # P0-4: only warn once per process about audit failures
+
+
+def _stream_audit_log(token_map, model, desan, start_perf, stream_error, shield_local):
+    """v0.6.3 (NEW-3 / P0-2): write a single desanitize_stream audit entry per
+    stream lifecycle.
+
+    `shield_local` is captured at wrapper-construction time (P0-2) so a
+    concurrent `disable()` mid-stream cannot null the shield and cause a silent
+    audit gap (the very Article 12 invariant NEW-3 was meant to close).
+
+    Audit failure is logged at WARNING (P0-4) instead of being silently
+    swallowed. Operators get visibility via stderr / cloakllm.audit logger.
+    The stream itself is never broken.
+    """
+    if shield_local is None or shield_local.audit is None:
+        return
+    elapsed_ms = (time.perf_counter() - start_perf) * 1000
+    # P2-1: rename bytes_processed -> chars_processed (the field counts
+    # str chars / UTF-16 code units, not bytes — name was misleading).
+    metadata = {"chars_processed": int(getattr(desan, "chars_processed", 0))}
+    if stream_error is not None:
+        metadata["stream_error"] = True
+        metadata["error_type"] = type(stream_error).__name__
     try:
-        with _maps_lock:
-            token_map = _active_maps.pop(call_key, None)
+        shield_local.audit.log(
+            event_type="desanitize_stream",
+            entity_count=token_map.entity_count if token_map else 0,
+            categories=dict(token_map.categories) if token_map else {},
+            tokens_used=list(token_map.reverse.keys()) if token_map else [],
+            latency_ms=elapsed_ms,
+            mode=token_map.mode if token_map else None,
+            entity_details=token_map.entity_details if token_map else [],
+            model=model,
+            metadata=metadata,
+        )
+    except Exception as e:
+        # P0-4: surface the failure instead of swallowing silently. We still
+        # never re-raise (would break the user's stream), but at least one
+        # warning per process points operators at the broken audit pipeline.
+        global _audit_failure_warned_once
+        if not _audit_failure_warned_once:
+            _audit_failure_warned_once = True
+            _audit_logger.warning(
+                "CloakLLM audit log write failed in stream wrapper: %s. "
+                "All subsequent audit failures of this kind will be silenced. "
+                "Investigate disk space, permissions, or audit chain integrity.",
+                type(e).__name__,
+            )
 
-        if not token_map or token_map.entity_count == 0:
+
+def _sync_stream_wrapper(stream, model: str, token_map, shield_local):
+    """Wrap a sync streaming response: incrementally desanitize tokens as they arrive.
+
+    v0.6.3 P0-2: token_map and shield_local are now passed in (popped/captured
+    synchronously by the outer wrapper). Removes the `disable()`-mid-stream race.
+    """
+    # P2-3: even when entity_count == 0, write a desanitize_stream audit entry
+    # marking the interaction. Strict Article 12: every LLM interaction logged.
+    if not token_map or token_map.entity_count == 0:
+        start_perf = time.perf_counter()
+        try:
             yield from stream
-            return
+        finally:
+            _stream_audit_log(token_map, model, _NoOpDesan(), start_perf, None, shield_local)
+        return
 
-        desan = StreamDesanitizer(token_map)
-        last_chunk = None
+    # v0.6.3 NEW-3.e: enforce per-stream input cap via StreamDesanitizer
+    max_in = getattr(shield_local.config, "max_input_length", 0) if shield_local else 0
+    desan = StreamDesanitizer(token_map, max_input_length=max_in)
+    last_chunk = None
+    start_perf = time.perf_counter()
+    stream_error = None
 
+    try:
         for chunk in stream:
             last_chunk = chunk
             if hasattr(chunk, "choices") and chunk.choices:
@@ -347,25 +423,35 @@ def _sync_stream_wrapper(stream, model: str, call_key: str):
         if flushed and last_chunk:
             last_chunk.choices[0].delta.content = flushed
             yield last_chunk
+    except Exception as e:
+        stream_error = e
+        raise
     finally:
-        with _maps_lock:
-            _active_maps.pop(call_key, None)
+        # v0.6.3 NEW-3: log exactly one desanitize_stream audit entry per
+        # stream lifecycle (Article 12 invariant — every interaction logged).
+        _stream_audit_log(token_map, model, desan, start_perf, stream_error, shield_local)
 
 
-async def _async_stream_wrapper(stream, model: str, call_key: str):
-    """Wrap an async streaming response: incrementally desanitize tokens as they arrive."""
-    try:
-        with _maps_lock:
-            token_map = _active_maps.pop(call_key, None)
-
-        if not token_map or token_map.entity_count == 0:
+async def _async_stream_wrapper(stream, model: str, token_map, shield_local):
+    """Async mirror of _sync_stream_wrapper. Same P0-2 guarantees."""
+    # P2-3: see sync wrapper.
+    if not token_map or token_map.entity_count == 0:
+        start_perf = time.perf_counter()
+        try:
             async for chunk in stream:
                 yield chunk
-            return
+        finally:
+            _stream_audit_log(token_map, model, _NoOpDesan(), start_perf, None, shield_local)
+        return
 
-        desan = StreamDesanitizer(token_map)
-        last_chunk = None
+    # v0.6.3 NEW-3.e
+    max_in = getattr(shield_local.config, "max_input_length", 0) if shield_local else 0
+    desan = StreamDesanitizer(token_map, max_input_length=max_in)
+    last_chunk = None
+    start_perf = time.perf_counter()
+    stream_error = None
 
+    try:
         async for chunk in stream:
             last_chunk = chunk
             if hasattr(chunk, "choices") and chunk.choices:
@@ -392,6 +478,15 @@ async def _async_stream_wrapper(stream, model: str, call_key: str):
         if flushed and last_chunk:
             last_chunk.choices[0].delta.content = flushed
             yield last_chunk
+    except Exception as e:
+        stream_error = e
+        raise
     finally:
-        with _maps_lock:
-            _active_maps.pop(call_key, None)
+        # v0.6.3 NEW-3
+        _stream_audit_log(token_map, model, desan, start_perf, stream_error, shield_local)
+
+
+class _NoOpDesan:
+    """Stand-in for StreamDesanitizer when there's no PII to desanitize.
+    Provides chars_processed=0 so _stream_audit_log can format a normal entry."""
+    chars_processed = 0
