@@ -215,33 +215,100 @@ class AuditLogger:
         self._log_dir = config.log_dir
         self._current_file: Optional[Path] = None
         self._initialized = False
-        self._lock = threading.Lock()
+        # v0.6.3 H4: RLock (was Lock) so _ensure_init can acquire the lock
+        # for double-checked locking even when called from inside log()'s
+        # critical section. Lock would deadlock; RLock allows re-entry by
+        # the same thread.
+        self._lock = threading.RLock()
+        # v0.6.3 H4: When True, the next write prepends a `\n`. Set during
+        # init recovery if the target log file exists and ends mid-line
+        # (e.g., a previous process crashed mid-write before the trailing
+        # newline). Without this, the new entry concatenates to the partial
+        # line and is itself unparseable, hiding the new entry from the
+        # chain on next recovery.
+        self._needs_leading_newline = False
 
-    def _ensure_init(self):
-        """Initialize log directory and recover chain state from existing logs."""
-        if self._initialized:
-            return
+    @staticmethod
+    def _scan_for_last_valid_entry(log_files):
+        """v0.6.3 H4: Scan backward through the most-recent log file to find
+        the last well-formed entry (with both `seq` and `entry_hash`). If the
+        most-recent file has no valid entries at all, walk to the older file.
 
-        self._log_dir.mkdir(parents=True, exist_ok=True)
+        Replaces the old behaviour of reading only the trailing line and
+        falling through to the previous file when that line was corrupt —
+        that silently rolled the chain back over any valid entries written
+        between the previous file and the corruption point, leaving them
+        stranded relative to the next entry.
 
-        # Recover chain state from most recent non-empty log file
-        log_files = sorted(self._log_dir.glob("audit_*.jsonl"))
+        Returns the parsed entry dict, or None if no valid entry is found
+        across all files.
+        """
         for log_file in reversed(log_files):
             try:
-                last_line = ""
                 with open(log_file, "r") as f:
-                    for line in f:
-                        if line.strip():
-                            last_line = line.strip()
-                if last_line:
-                    entry = json.loads(last_line)
-                    self._seq = entry["seq"] + 1
-                    self._prev_hash = entry["entry_hash"]
-                    break
-            except (json.JSONDecodeError, KeyError):
-                continue  # Try older file if this one is corrupted
+                    lines = [ln.strip() for ln in f if ln.strip()]
+            except OSError:
+                continue
+            for line in reversed(lines):
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue  # corrupt line — keep scanning backward in this file
+                if "seq" in entry and "entry_hash" in entry:
+                    return entry
+            # this file had no valid entries at all — try the next-older one
+        return None
 
-        self._initialized = True
+    def _ensure_init(self):
+        """Initialize log directory and recover chain state from existing logs.
+
+        v0.6.3 H4 changes:
+          * Double-checked locking — concurrent first callers can't both
+            run init and overwrite each other's state mid-flight.
+          * Backward scan via `_scan_for_last_valid_entry` — partial-write
+            corruption at the tail of the log no longer strands earlier
+            valid entries from the chain.
+          * Strict mode (config.audit_strict_chain): if log files exist
+            on disk but recovery returns None, raise instead of silently
+            restarting from GENESIS. Closes the "attacker corrupts logs to
+            mask tampering as restart" surface for compliance deployments.
+        """
+        if self._initialized:
+            return
+        with self._lock:
+            if self._initialized:
+                return  # double-checked: another thread won the race
+            self._log_dir.mkdir(parents=True, exist_ok=True)
+            log_files = sorted(self._log_dir.glob("audit_*.jsonl"))
+            # v0.6.3 H4: Detect partial-write tail on the file we're about to
+            # write into. If today's log file exists and doesn't end with
+            # `\n`, the next write must prepend `\n` to avoid concatenating
+            # the new entry onto the truncation.
+            today_file = self._get_log_file()
+            if today_file.exists() and today_file.stat().st_size > 0:
+                try:
+                    with open(today_file, "rb") as _f:
+                        _f.seek(-1, 2)
+                        if _f.read(1) != b"\n":
+                            self._needs_leading_newline = True
+                except OSError:
+                    pass
+            last_entry = self._scan_for_last_valid_entry(log_files)
+            if last_entry is not None:
+                self._seq = last_entry["seq"] + 1
+                self._prev_hash = last_entry["entry_hash"]
+            elif log_files and getattr(self.config, "audit_strict_chain", False):
+                raise RuntimeError(
+                    f"CloakLLM audit chain recovery failed: log dir "
+                    f"{self._log_dir!s} contains {len(log_files)} file(s) but "
+                    f"none have a recoverable trailing entry. Refusing to "
+                    f"silently restart from GENESIS (audit_strict_chain=True). "
+                    f"Inspect the files for corruption — a silent restart "
+                    f"would let an attacker mask tampering as a normal restart."
+                )
+            # else: log_files empty (truly first run) OR all files empty AND
+            # strict mode off → start from GENESIS (back-compat default).
+            self._initialized = True
 
     def _get_log_file(self) -> Path:
         """Get today's log file path."""
@@ -357,7 +424,14 @@ class AuditLogger:
 
             # Write to log file
             log_file = self._get_log_file()
-            self._write_with_lock(log_file, json.dumps(entry_data, separators=(",", ":")) + "\n")
+            payload = json.dumps(entry_data, separators=(",", ":")) + "\n"
+            # v0.6.3 H4: prepend `\n` if recovery detected the target file
+            # ends mid-line (partial-write tail from a prior crash). The flag
+            # is one-shot — clear after first use.
+            if self._needs_leading_newline:
+                payload = "\n" + payload
+                self._needs_leading_newline = False
+            self._write_with_lock(log_file, payload)
 
             # Update chain state
             self._prev_hash = entry_hash

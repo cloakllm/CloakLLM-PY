@@ -121,6 +121,14 @@ class ShieldConfig:
     log_dir: Path = field(
         default_factory=lambda: Path(os.getenv("CLOAKLLM_LOG_DIR", "./cloakllm_audit"))
     )
+    # v0.6.3 H4: When True, refuse to silently restart the audit chain from
+    # GENESIS if the log dir contains files but recovery couldn't find any
+    # well-formed prior entry. Defaults to False for backward-compat — set
+    # True (or env CLOAKLLM_AUDIT_STRICT_CHAIN=true) for compliance-grade
+    # deployments where a silent chain restart could mask tampering.
+    audit_strict_chain: bool = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_AUDIT_STRICT_CHAIN", "false").lower() == "true"
+    )
     # --- OpenTelemetry ---
     otel_enabled: bool = field(
         default_factory=lambda: os.getenv("CLOAKLLM_OTEL_ENABLED", "false").lower() == "true"
