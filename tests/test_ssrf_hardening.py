@@ -115,9 +115,31 @@ class TestCheckIpAllowed(unittest.TestCase):
         self.assertFalse(_check_ip_allowed("ff02::1", allow_remote=True))
 
     def test_carrier_grade_nat_denied(self):
-        # 100.64.0.0/10 — used by some clouds for metadata
+        # 100.64.0.0/10 — used by some clouds for metadata (Alibaba 100.100.100.200)
         self.assertFalse(_check_ip_allowed("100.64.0.1", allow_remote=True))
         self.assertFalse(_check_ip_allowed("100.127.255.254", allow_remote=True))
+        self.assertFalse(_check_ip_allowed("100.100.100.200", allow_remote=True))  # Alibaba IMDS
+
+    def test_oracle_imds_denied(self):
+        # Oracle Cloud IMDS at 192.0.0.192 — IETF protocol assignments range.
+        # Not in the legacy private allow (192.168/16 is), so allow_remote=False
+        # already denied it; allow_remote=True must STILL deny it.
+        self.assertFalse(_check_ip_allowed("192.0.0.192", allow_remote=True))
+        self.assertFalse(_check_ip_allowed("192.0.0.0", allow_remote=True))
+        self.assertFalse(_check_ip_allowed("192.0.0.255", allow_remote=True))
+        # Adjacent IPv4 outside /24 stays subject to allow_remote
+        self.assertTrue(_check_ip_allowed("192.0.1.1", allow_remote=True))
+        self.assertFalse(_check_ip_allowed("192.0.1.1", allow_remote=False))
+
+    def test_aws_ipv6_imds_denied(self):
+        # AWS IPv6 IMDS at fd00:ec2::254 lives inside fc00::/7 ULA, which is
+        # in the legacy private allow list. The deny check must run first
+        # and block it even when the address is technically a private ULA.
+        self.assertFalse(_check_ip_allowed("fd00:ec2::254", allow_remote=True))
+        self.assertFalse(_check_ip_allowed("fd00:ec2::1", allow_remote=True))
+        # Other ULA addresses stay allowed (legitimate same-network Ollama)
+        self.assertTrue(_check_ip_allowed("fd00:abcd::1", allow_remote=False))
+        self.assertTrue(_check_ip_allowed("fd00:1234::1", allow_remote=False))
 
     def test_public_address_requires_allow_remote(self):
         # 8.8.8.8 is genuinely public — denied by default, allowed when opted in.

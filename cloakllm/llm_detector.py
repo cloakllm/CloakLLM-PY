@@ -98,14 +98,21 @@ _PRIVATE_NETWORKS = [
 # legitimate Ollama hosts and would constitute SSRF if reached.
 _ALWAYS_DENY_NETWORKS = [
     ipaddress.ip_network("169.254.0.0/16"),    # IPv4 link-local + AWS/GCP/Azure IMDS
-    ipaddress.ip_network("100.64.0.0/10"),     # Carrier-grade NAT (some cloud metadata setups)
+    ipaddress.ip_network("100.64.0.0/10"),     # Carrier-grade NAT (covers Alibaba 100.100.100.200)
+    ipaddress.ip_network("192.0.0.0/24"),      # IETF protocol assignments — covers Oracle Cloud IMDS at 192.0.0.192
     ipaddress.ip_network("0.0.0.0/8"),         # "this network" — 0.0.0.0 aliases to localhost on Linux
     ipaddress.ip_network("224.0.0.0/4"),       # IPv4 multicast
     ipaddress.ip_network("240.0.0.0/4"),       # IPv4 reserved (future use)
     ipaddress.ip_network("::/128"),            # IPv6 unspecified
     ipaddress.ip_network("ff00::/8"),          # IPv6 multicast
+    # AWS uses fd00:ec2::254 for IPv6 IMDS, which lives inside fc00::/7 ULA
+    # (which IS in PRIVATE_NETWORKS for legitimate same-network Ollama). Add
+    # the AWS IPv6 IMDS subnet to deny so the deny check (which runs first)
+    # blocks it before the private-allow check passes it through.
+    ipaddress.ip_network("fd00:ec2::/64"),     # AWS IPv6 IMDS
     # Note: fe80::/10 (IPv6 link-local) is NOT in deny because legitimate
-    # same-link Ollama uses it. AWS/GCP/Azure don't use IPv6 link-local for IMDS.
+    # same-link Ollama uses it; GCP uses it only for neighbour-discovery,
+    # Azure uses it for the VM's own NIC, no IMDS lives there.
 ]
 
 

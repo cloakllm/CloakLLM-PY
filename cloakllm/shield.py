@@ -175,7 +175,18 @@ class Shield:
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-        # Build timing breakdown
+        # v0.6.3 H3 design note: sanitize entries deliberately keep
+        # microsecond timing precision (round-2-decimal). Bucketing was
+        # considered for cross-call shape consistency with desanitize entries
+        # but rejected because:
+        #   * Sanitize timing varies primarily on input length and the set of
+        #     enabled detection passes — both of which the input submitter
+        #     already knows. There is no token-presence inference to leak.
+        #   * Operational dashboards rely on full-precision sanitize timing
+        #     to spot regressions in detection backends; bucketing would
+        #     hide real perf bugs.
+        # Desanitize is bucketed because the side channel there is "did
+        # token X appear in this input" — see desanitize() for details.
         timing = {
             "total_ms": round(elapsed_ms, 2),
             "detection_ms": round(detection_ms, 2),
