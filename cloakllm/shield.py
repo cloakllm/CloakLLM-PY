@@ -623,6 +623,16 @@ class Shield:
                 JSON encoding to verify pre-v0.6.1 audit chains containing
                 non-ASCII data. Sunset in v0.7.0.
 
+                **Cross-SDK limitation (v0.6.3 I3):** The legacy_canonical
+                flag restores the v0.6.0 hashing behavior PER-SDK. Python
+                v0.6.0 escaped non-ASCII characters (e.g. `é` → `\\u00e9`);
+                JavaScript v0.6.0 preserved UTF-8. A Python v0.6.0 audit chain
+                containing non-ASCII data in `categories`, `metadata`, or
+                `entity_details` CANNOT be re-verified by the JS verifier with
+                `legacyCanonical: true`, and vice versa. There is no migration
+                path for those specific cross-SDK chains. Same-SDK chains
+                (Python verified by Python, JS by JS) are unaffected.
+
         Returns:
             Default dict shape, or compliance report dict when requested.
         """

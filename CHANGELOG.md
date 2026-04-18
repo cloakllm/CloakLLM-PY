@@ -45,6 +45,7 @@ versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Known issues
 
 - **`llm_allow_remote=True` SSRF bypass paths (H2).** The Ollama URL validator has known gaps (DNS rebinding, integer/octal IPv4, IPv4-mapped IPv6 metadata addresses). When `llm_allow_remote=True` is set, a `RuntimeWarning` now fires at `LlmDetector` init pointing to the tracking issue. **Do not use `llm_allow_remote=True` in production until v0.6.2.** The default `llm_allow_remote=False` is unaffected.
+- **Cross-SDK verification of v0.6.0 legacy chains containing non-ASCII data.** Python v0.6.0 escaped non-ASCII as `\uXXXX` while JS v0.6.0 preserved UTF-8 in canonical JSON. Audit chains written by Python v0.6.0 containing non-ASCII data (e.g. European names in `error_message` fields) cannot be verified by the JS SDK with `legacyCanonical: true`, and vice versa. Re-write the chain by replaying through v0.6.1+ to get fully cross-SDK verifiable entries. ASCII-only legacy chains verify correctly across both SDKs. See `CloakLLM/COMPLIANCE.md` § Cross-Language Compatibility.
 
 ## [0.6.0] - 2026-04-16
 
