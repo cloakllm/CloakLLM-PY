@@ -18,6 +18,70 @@ from pathlib import Path
 from typing import Any, Optional
 
 
+def validate_filesystem_path(
+    path_obj: "Path",
+    name: str,
+    *,
+    is_dir: bool,
+    strict_paths: bool = False,
+    cwd: "Optional[Path]" = None,
+) -> None:
+    """v0.6.3 H5/G1: Centralized path validation, exposed for runtime callers.
+
+    Always rejects:
+      * Paths containing NUL bytes (defense vs C-string truncation in
+        downstream tools that consume CloakLLM-produced filenames).
+      * Paths that exist as symlinks (attacker-replaceable surface — a
+        symlink at the destination redirects writes to anywhere the
+        attacker controls).
+
+    Optionally (strict_paths=True): rejects paths outside the current
+    working directory. Otherwise emits a RuntimeWarning for that case.
+
+    Used by:
+      * ShieldConfig.__post_init__ at construction time (log_dir,
+        attestation_key_path) — H5.
+      * Shield.export_compliance_config at runtime (path arg) — G1.
+        The runtime call site needs the same protections; previously the
+        caller-supplied `path` was passed straight to `open()` without any
+        validation, leaving a symlink-swap surface (an attacker who can
+        pre-create the destination as a symlink to a sensitive file gets
+        the compliance config overwritten there — data-loss attack).
+
+    Raises:
+        ValueError on NUL byte, symlink, or strict-paths CWD violation.
+    """
+    import os as _os
+    import warnings as _warnings
+    raw = str(path_obj)
+    if "\x00" in raw:
+        raise ValueError(
+            f"CloakLLM: {name} '{raw!r}' contains a NUL byte. "
+            f"Refusing for security."
+        )
+    try:
+        if path_obj.is_symlink():
+            raise ValueError(
+                f"CloakLLM: {name} '{path_obj}' is a symlink "
+                f"(target: {_os.readlink(path_obj)!r}). Refusing for "
+                f"security — set the config to the real destination."
+            )
+    except OSError:
+        pass  # path doesn't exist — let downstream open/mkdir handle it
+    resolved = path_obj.resolve()
+    base_cwd = (cwd or Path.cwd()).resolve()
+    try:
+        resolved.relative_to(base_cwd)
+    except ValueError:
+        msg = (
+            f"CloakLLM: {name} '{resolved}' is outside the current "
+            f"working directory."
+        )
+        if strict_paths:
+            raise ValueError(msg + " (strict_paths=True)")
+        _warnings.warn(msg, RuntimeWarning, stacklevel=3)
+
+
 _LOCALE_MODELS = {
     "en": "en_core_web_sm",
     "de": "de_core_news_sm",
@@ -277,55 +341,15 @@ class ShieldConfig:
             if model:
                 self.spacy_model = model
 
-        # Path validation (v0.6.3 H5: hardened)
-        import warnings as _warnings
-        _cwd = Path.cwd().resolve()
-
-        def _validate_path(path_obj: Path, name: str, *, is_dir: bool) -> None:
-            """v0.6.3 H5: Centralized path validation. Always rejects:
-              * paths containing NUL bytes (defense vs C-string truncation
-                in downstream tools that consume audit log filenames)
-              * paths that exist as symlinks (attacker-replaceable surface
-                for redirecting audit writes)
-            Optionally (audit_strict_paths=True): rejects paths outside CWD.
-            Otherwise emits a RuntimeWarning for the outside-CWD case.
-            """
-            raw = str(path_obj)
-            if "\x00" in raw:
-                raise ValueError(
-                    f"CloakLLM: {name} '{raw!r}' contains a NUL byte. "
-                    f"Refusing for security."
-                )
-            # is_symlink() returns True iff the path itself is a symlink.
-            # A symlink-replaced log_dir lets an attacker redirect writes
-            # to a directory THEY control AND have us read THEIR files
-            # during chain recovery. Always reject.
-            try:
-                if path_obj.is_symlink():
-                    raise ValueError(
-                        f"CloakLLM: {name} '{path_obj}' is a symlink "
-                        f"(target: {os.readlink(path_obj)!r}). Refusing for "
-                        f"security — set the config to the real destination."
-                    )
-            except OSError:
-                pass  # path doesn't exist or can't be stat'd — let mkdir/open handle it
-
-            resolved = path_obj.resolve()
-            try:
-                resolved.relative_to(_cwd)
-            except ValueError:
-                msg = (
-                    f"CloakLLM: {name} '{resolved}' is outside the current "
-                    f"working directory."
-                )
-                if self.audit_strict_paths:
-                    raise ValueError(msg + " (audit_strict_paths=True)")
-                _warnings.warn(msg, RuntimeWarning, stacklevel=3)
-
-        _validate_path(self.log_dir, "log_dir", is_dir=True)
+        # Path validation (v0.6.3 H5: hardened; G1 extends to runtime calls)
+        validate_filesystem_path(
+            self.log_dir, "log_dir", is_dir=True,
+            strict_paths=self.audit_strict_paths,
+        )
         if self.attestation_key_path:
-            _validate_path(
+            validate_filesystem_path(
                 Path(self.attestation_key_path),
                 "attestation_key_path",
                 is_dir=False,
+                strict_paths=self.audit_strict_paths,
             )

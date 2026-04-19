@@ -101,7 +101,10 @@ class TestStrictPathsMode(unittest.TestCase):
             ShieldConfig(log_dir=self.tmp, audit_strict_paths=True)
         msg = str(cm.exception)
         self.assertIn("outside the current working directory", msg)
-        self.assertIn("audit_strict_paths=True", msg)
+        # v0.6.3 G1: helper extracted to module level, error message now
+        # uses generic "strict_paths=True" (the helper's own param name)
+        # rather than the dataclass field name "audit_strict_paths".
+        self.assertIn("strict_paths=True", msg)
 
     def test_inside_cwd_strict_no_raise(self):
         # If log_dir IS under CWD, strict mode is silent.
