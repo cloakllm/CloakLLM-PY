@@ -106,5 +106,99 @@ class TestLowercaseTokenWarning(unittest.TestCase):
         self.assertTrue(any("case-variant" in m for m in cm.output))
 
 
+class TestLowercaseTokenWarningInStreamDesanitizer(unittest.TestCase):
+    """v0.6.3 G3: streaming path must also fire the case-variant warning.
+
+    Streaming is the dominant production path under v0.6.3 — without this
+    wiring, streaming users get no signal that their LLM is producing
+    malformed tokens. The shared `_warn_case_mismatch_once` gate is the
+    same one batched detokenize uses, so streaming + batched contribute
+    to a single per-process warning.
+    """
+
+    def setUp(self):
+        tokmod._CASE_MISMATCH_WARNED = False
+        from cloakllm.stream import StreamDesanitizer
+        from cloakllm.tokenizer import TokenMap
+        # Build a token map by hand so we can control the canonical case.
+        self._TokenMap = TokenMap
+        self._StreamDesanitizer = StreamDesanitizer
+
+    def _make_map(self):
+        tm = self._TokenMap()
+        tm.reverse["[EMAIL_0]"] = "alice@example.com"
+        return tm
+
+    def test_lowercase_token_in_stream_chunk_warns(self):
+        tm = self._make_map()
+        desan = self._StreamDesanitizer(tm)
+        with self.assertLogs("cloakllm.tokenizer", level="WARNING") as cm:
+            out = desan.feed("Reach out to [email_0] today")
+        self.assertIn("alice@example.com", out)
+        self.assertTrue(any("case-variant" in m for m in cm.output))
+        self.assertTrue(any("[email_0]" in m for m in cm.output))
+
+    def test_canonical_token_in_stream_chunk_does_not_warn(self):
+        tm = self._make_map()
+        desan = self._StreamDesanitizer(tm)
+        logger = logging.getLogger("cloakllm.tokenizer")
+        records: list[logging.LogRecord] = []
+        h = logging.Handler()
+        h.emit = records.append
+        h.setLevel(logging.WARNING)
+        logger.addHandler(h)
+        try:
+            out = desan.feed("Reach out to [EMAIL_0] today")
+        finally:
+            logger.removeHandler(h)
+        self.assertIn("alice@example.com", out)
+        case_records = [r for r in records if "case-variant" in r.getMessage()]
+        self.assertEqual(case_records, [])
+
+    def test_streaming_and_batched_share_one_warning(self):
+        # First call (streaming) fires the warning; subsequent batched
+        # call must NOT fire a second warning — same process gate.
+        tm = self._make_map()
+        desan = self._StreamDesanitizer(tm)
+        with self.assertLogs("cloakllm.tokenizer", level="WARNING") as cm1:
+            desan.feed("Reach [email_0]")
+        self.assertTrue(any("case-variant" in m for m in cm1.output))
+
+        # Now run a batched detokenize that ALSO has a case mismatch.
+        # The shared gate should suppress the second warning.
+        from cloakllm import Shield, ShieldConfig
+        from cloakllm.tokenizer import Tokenizer
+        shield = Shield(ShieldConfig(audit_enabled=False))
+        # Sanitize to populate a real TokenMap with [EMAIL_0]
+        _, real_tm = shield.sanitize("Contact bob@example.com")
+        logger = logging.getLogger("cloakllm.tokenizer")
+        records: list[logging.LogRecord] = []
+        h = logging.Handler()
+        h.emit = records.append
+        h.setLevel(logging.WARNING)
+        logger.addHandler(h)
+        try:
+            shield.desanitize("ping [email_0]", real_tm)
+        finally:
+            logger.removeHandler(h)
+        case_records = [r for r in records if "case-variant" in r.getMessage()]
+        self.assertEqual(
+            case_records, [],
+            "second warning should be gated by the shared process flag"
+        )
+
+    def test_token_split_across_chunks_still_warns(self):
+        # The whole point of streaming: tokens may arrive across chunk
+        # boundaries. Case-variant detection must work after reassembly.
+        tm = self._make_map()
+        desan = self._StreamDesanitizer(tm)
+        with self.assertLogs("cloakllm.tokenizer", level="WARNING") as cm:
+            out1 = desan.feed("Reach out to [emai")
+            out2 = desan.feed("l_0] today")
+        full = out1 + out2
+        self.assertIn("alice@example.com", full)
+        self.assertTrue(any("case-variant" in m for m in cm.output))
+
+
 if __name__ == "__main__":
     unittest.main()

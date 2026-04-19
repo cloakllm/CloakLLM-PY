@@ -7,7 +7,11 @@ the entire response. Emits text as soon as it's safe to do so.
 
 from __future__ import annotations
 from cloakllm.token_spec import MAX_TOKEN_LENGTH as _MAX_TOKEN_LEN
-from cloakllm.tokenizer import TokenMap, _ESCAPED_PATTERN
+from cloakllm.tokenizer import (
+    TokenMap,
+    _ESCAPED_PATTERN,
+    _warn_case_mismatch_once,  # v0.6.3 I5/G3: shared one-shot warning gate
+)
 
 
 class StreamDesanitizer:
@@ -38,6 +42,13 @@ class StreamDesanitizer:
         self._buffer = ""
         self._reverse_ci: dict[str, str] = {
             k.lower(): v for k, v in token_map.reverse.items()
+        }
+        # v0.6.3 I5/G3: parallel map from lowercase token → CANONICAL form
+        # (the original-case token as issued during sanitize). Used to detect
+        # case-variant substitutions in the streaming path so we can fire the
+        # same one-time warning the batched detokenize() emits.
+        self._canonical_by_lower: dict[str, str] = {
+            k.lower(): k for k in token_map.reverse.keys()
         }
         # v0.6.3 NEW-3.e + P2-1: track cumulative chunk CHARS (not bytes —
         # `len(str)` in Python is char count, not UTF-8 byte count). Stream
@@ -116,6 +127,15 @@ class StreamDesanitizer:
                 candidate_lower = candidate.lower()
 
                 if candidate_lower in self._reverse_ci:
+                    # v0.6.3 I5/G3: detect case-variant before substituting.
+                    # `candidate` is the literal text from the LLM stream;
+                    # `_canonical_by_lower[...]` is the form we issued during
+                    # sanitize. If they differ, the LLM lowercased / TitleCased
+                    # the token — fire the one-shot warning so operators learn
+                    # to adjust their prompt.
+                    canonical = self._canonical_by_lower[candidate_lower]
+                    if candidate != canonical:
+                        _warn_case_mismatch_once(candidate)
                     output_parts.append(self._reverse_ci[candidate_lower])
                     self._buffer = self._buffer[close_pos + 1:]
                 else:

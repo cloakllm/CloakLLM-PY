@@ -278,7 +278,21 @@ class AuditLogger:
         with self._lock:
             if self._initialized:
                 return  # double-checked: another thread won the race
-            self._log_dir.mkdir(parents=True, exist_ok=True)
+            # v0.6.3 G7: create the audit dir with mode 0o700 so other system
+            # users cannot list audit log filenames. Default Linux umask
+            # would otherwise leave the dir 0o755 (world-readable directory
+            # entries reveal which days have audit activity). On Windows the
+            # mode arg is largely ignored — operators must rely on NTFS ACLs.
+            self._log_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            # If the directory already existed with looser permissions, tighten
+            # it. POSIX-only; Windows chmod is a no-op for these bits.
+            try:
+                import sys as _sys
+                if _sys.platform != "win32":
+                    import os as _os
+                    _os.chmod(self._log_dir, 0o700)
+            except OSError:
+                pass
             log_files = sorted(self._log_dir.glob("audit_*.jsonl"))
             # v0.6.3 H4: Detect partial-write tail on the file we're about to
             # write into. If today's log file exists and doesn't end with
@@ -316,9 +330,24 @@ class AuditLogger:
         return self._log_dir / f"audit_{today}.jsonl"
 
     def _write_with_lock(self, log_file: Path, data: str) -> None:
-        """Write to audit log with cross-process file locking."""
+        """Write to audit log with cross-process file locking.
+
+        v0.6.3 G7: opens with `os.open(..., O_WRONLY|O_CREAT|O_APPEND, 0o600)`
+        on POSIX so other system users cannot read audit log contents (entity
+        hashes, token counts, categories, timing). Default umask would leave
+        the file 0o644 — readable by every user on the host. On Windows the
+        mode arg is largely a no-op; operators must rely on NTFS ACLs.
+        Existing files keep their current mode (we don't tighten on every
+        write — only the audit dir is chmod'd defensively at init).
+        """
         import sys
-        with open(log_file, "a") as f:
+        import os as _os
+        # Open with explicit 0o600 mode. On POSIX this is the file-creation
+        # mode (umask still applies, so the effective bits may be tighter
+        # but never looser).
+        flags = _os.O_WRONLY | _os.O_CREAT | _os.O_APPEND
+        fd = _os.open(log_file, flags, 0o600)
+        with _os.fdopen(fd, "a") as f:
             if sys.platform == "win32":
                 import msvcrt
                 try:

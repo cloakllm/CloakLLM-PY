@@ -17,13 +17,43 @@ from dataclasses import dataclass, field
 
 _logger = logging.getLogger("cloakllm.tokenizer")
 
-# v0.6.3 I5: one-time warning gate. The first time detokenize substitutes a
-# lowercase (or otherwise case-variant) token from LLM output, we log a
-# warning so operators know their LLM is producing malformed tokens. Repeated
-# substitutions don't re-log to avoid noise. Process-level (not per-Shield)
-# because the signal is the same: "your LLM is misbehaving" — once is enough.
+# v0.6.3 I5: one-time warning gate. The first time ANY desanitize path
+# (Tokenizer.detokenize OR StreamDesanitizer.feed) substitutes a lowercase
+# / case-variant token from LLM output, we log a warning so operators know
+# their LLM is producing malformed tokens. Process-level so streaming and
+# batched paths share the gate — operators get one warning per process,
+# regardless of which path saw the mismatch first.
 _CASE_MISMATCH_WARNED = False
 _CASE_MISMATCH_LOCK = threading.Lock()
+
+
+def _warn_case_mismatch_once(sample: str) -> None:
+    """v0.6.3 I5 (G3 fix): shared one-time warning trigger.
+
+    Called by both `Tokenizer.detokenize()` and
+    `cloakllm.stream.StreamDesanitizer.feed()` when a case-variant
+    substitution is detected. The single process-level gate ensures
+    operators see exactly one warning per process regardless of which
+    desanitize path triggered it.
+
+    The streaming path is the dominant production wiring under v0.6.3
+    (the streaming audit fix from NEW-3 makes it the default for any
+    OpenAI/LiteLLM streaming response), so wiring this here is critical
+    — without it, streaming users get no signal that their LLM is
+    producing malformed tokens.
+    """
+    global _CASE_MISMATCH_WARNED
+    with _CASE_MISMATCH_LOCK:
+        if _CASE_MISMATCH_WARNED:
+            return
+        _CASE_MISMATCH_WARNED = True
+    _logger.warning(
+        "CloakLLM detokenize: substituted a lowercase / case-variant token "
+        "(%r). LLMs that lowercase tokens indicate prompt drift — consider "
+        "instructing the model to preserve token case verbatim. Substitution "
+        "still succeeded; this warning fires once per process.",
+        sample,
+    )
 from typing import Any, Optional
 
 from cloakllm.config import ShieldConfig
@@ -232,22 +262,10 @@ class Tokenizer:
             result = re.sub(re.escape(token), _replace, result, flags=re.IGNORECASE)
 
         # v0.6.3 I5: emit one-time warning if any case-variant substitution
-        # happened. Use a process-level gate (not per-Shield) — the signal is
-        # the same regardless of which Shield instance saw it.
+        # happened. Delegates to the shared `_warn_case_mismatch_once` gate
+        # so streaming and batched paths share the single process-level limit.
         if case_variant_seen:
-            global _CASE_MISMATCH_WARNED
-            with _CASE_MISMATCH_LOCK:
-                if not _CASE_MISMATCH_WARNED:
-                    _CASE_MISMATCH_WARNED = True
-                    sample = case_variant_seen[0]
-                    _logger.warning(
-                        "CloakLLM detokenize: substituted a lowercase / "
-                        "case-variant token (%r). LLMs that lowercase tokens "
-                        "indicate prompt drift — consider instructing the "
-                        "model to preserve token case verbatim. Substitution "
-                        "still succeeded; this warning fires once per process.",
-                        sample,
-                    )
+            _warn_case_mismatch_once(case_variant_seen[0])
 
         # Restore any escaped token-like patterns from the original input
         result = self._unescape_tokens(result)

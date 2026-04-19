@@ -237,6 +237,34 @@ class ShieldConfig:
                     f"Custom LLM category '{name}' conflicts with built-in category."
                 )
 
+        # v0.6.3 G6: validate custom_patterns names too. The JS H9 work added
+        # this for ShieldConfig.customPatterns; the Python equivalent was
+        # missed. Without this, callers passing
+        # `custom_patterns=[("__proto__", r"...")]` create a category name
+        # that flows into dynamic dict-key writes downstream (categories
+        # counter, audit-entry serialization). The pollution surface is much
+        # smaller in Python (dicts don't have a special __proto__ getter)
+        # but the hygiene + invariant ("category names are uppercase
+        # identifiers") matters for both SDKs.
+        for entry in self.custom_patterns:
+            # custom_patterns is List[Tuple[str, str]] — defensive unpack.
+            if not isinstance(entry, (tuple, list)) or len(entry) < 2:
+                raise ValueError(
+                    f"Invalid custom_patterns entry {entry!r}. "
+                    f"Must be a (name, regex) tuple."
+                )
+            name = entry[0]
+            if not isinstance(name, str) or not validate_category_name(name):
+                raise ValueError(
+                    f"Invalid custom pattern name {name!r}. "
+                    f"Must be a string matching ^[A-Z][A-Z0-9_]*$"
+                )
+            if name in RESERVED_CATEGORIES:
+                raise ValueError(
+                    f"Custom pattern '{name}' conflicts with built-in category. "
+                    f"Pick a different name."
+                )
+
         # Auto-select spaCy model if locale != en and user didn't explicitly override.
         # Note: This checks if spacy_model still equals the default "en_core_web_sm".
         # If a user explicitly passes spacy_model="en_core_web_sm" AND locale="de",
