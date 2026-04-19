@@ -10,9 +10,20 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import re
 import threading
 from dataclasses import dataclass, field
+
+_logger = logging.getLogger("cloakllm.tokenizer")
+
+# v0.6.3 I5: one-time warning gate. The first time detokenize substitutes a
+# lowercase (or otherwise case-variant) token from LLM output, we log a
+# warning so operators know their LLM is producing malformed tokens. Repeated
+# substitutions don't re-log to avoid noise. Process-level (not per-Shield)
+# because the signal is the same: "your LLM is misbehaving" — once is enough.
+_CASE_MISMATCH_WARNED = False
+_CASE_MISMATCH_LOCK = threading.Lock()
 from typing import Any, Optional
 
 from cloakllm.config import ShieldConfig
@@ -193,10 +204,17 @@ class Tokenizer:
 
         Handles:
         - Exact token matches: [PERSON_0] -> John Smith
-        - Case variations of tokens
+        - Case variations of tokens (LLMs sometimes lowercase output)
         - Tokens appearing multiple times
+
+        v0.6.3 I5: when a case-variant substitution occurs (e.g., LLM
+        produced ``[email_0]`` instead of the canonical ``[EMAIL_0]``),
+        a one-time warning is logged via ``cloakllm.tokenizer`` so
+        operators know their LLM is generating malformed tokens. Repeated
+        case-variant substitutions don't re-log.
         """
         result = text
+        case_variant_seen: list[str] = []  # accumulator across all tokens
 
         # Sort tokens by length (longest first) to avoid partial replacements
         sorted_tokens = sorted(
@@ -206,7 +224,30 @@ class Tokenizer:
         )
 
         for token, original in sorted_tokens:
-            result = re.sub(re.escape(token), lambda m: original, result, flags=re.IGNORECASE)
+            def _replace(m, _tok=token):
+                # v0.6.3 I5: detect case mismatch before substituting.
+                if m.group(0) != _tok:
+                    case_variant_seen.append(m.group(0))
+                return original
+            result = re.sub(re.escape(token), _replace, result, flags=re.IGNORECASE)
+
+        # v0.6.3 I5: emit one-time warning if any case-variant substitution
+        # happened. Use a process-level gate (not per-Shield) — the signal is
+        # the same regardless of which Shield instance saw it.
+        if case_variant_seen:
+            global _CASE_MISMATCH_WARNED
+            with _CASE_MISMATCH_LOCK:
+                if not _CASE_MISMATCH_WARNED:
+                    _CASE_MISMATCH_WARNED = True
+                    sample = case_variant_seen[0]
+                    _logger.warning(
+                        "CloakLLM detokenize: substituted a lowercase / "
+                        "case-variant token (%r). LLMs that lowercase tokens "
+                        "indicate prompt drift — consider instructing the "
+                        "model to preserve token case verbatim. Substitution "
+                        "still succeeded; this warning fires once per process.",
+                        sample,
+                    )
 
         # Restore any escaped token-like patterns from the original input
         result = self._unescape_tokens(result)
