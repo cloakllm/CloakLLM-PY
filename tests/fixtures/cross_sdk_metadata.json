@@ -1,0 +1,37 @@
+{
+  "javascript_certificate": {
+    "entity_count": 1,
+    "input_hash": "4fb7e3a4294e6085f1e05587e0f03584d9d29ea5fc9ee4d8761018ac06e66255",
+    "output_hash": "d2ba594b6e108fceaee1aed62366f794b02166830f387918e100645e37eb9560",
+    "self_verify_ok": true,
+    "writer_sdk": "javascript",
+    "writer_version": "0.6.3"
+  },
+  "javascript_chain": {
+    "chain_errors": [],
+    "chain_valid": true,
+    "entries": 3,
+    "final_seq": 2,
+    "format": "jsonl",
+    "writer_sdk": "javascript",
+    "writer_version": "0.6.3"
+  },
+  "python_certificate": {
+    "entity_count": 1,
+    "input_hash": "4fb7e3a4294e6085f1e05587e0f03584d9d29ea5fc9ee4d8761018ac06e66255",
+    "output_hash": "d2ba594b6e108fceaee1aed62366f794b02166830f387918e100645e37eb9560",
+    "self_verify_ok": true,
+    "writer_sdk": "python",
+    "writer_version": "0.6.3"
+  },
+  "python_chain": {
+    "chain_errors": [],
+    "chain_valid": true,
+    "entries": 3,
+    "final_seq": 2,
+    "format": "jsonl",
+    "writer_sdk": "python",
+    "writer_version": "0.6.3"
+  },
+  "regenerated_at_utc": "2026-04-19"
+}

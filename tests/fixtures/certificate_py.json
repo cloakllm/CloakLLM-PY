@@ -1,0 +1,22 @@
+{
+  "certificate": {
+    "categories": {
+      "EMAIL": 1
+    },
+    "detection_passes": [
+      "regex"
+    ],
+    "entity_count": 1,
+    "input_hash": "4fb7e3a4294e6085f1e05587e0f03584d9d29ea5fc9ee4d8761018ac06e66255",
+    "key_id": "cross_sdk_test_v063",
+    "mode": "tokenize",
+    "nonce": "f3e8b804-4af2-4492-9b49-175b0d2440b6",
+    "output_hash": "d2ba594b6e108fceaee1aed62366f794b02166830f387918e100645e37eb9560",
+    "public_key": "Bz4CGDV39PewTTD0bTiwuIs7PsblbNtfDDgH16sKo0E=",
+    "signature": "uqm+R7e0EQg3fWkNlrXWsz23IleiE4JyzhfE3hUTnCYYNPJZ1iuN/hkmW4FxQ5UBZMEBWKftLDz4d1IqcbvzAg==",
+    "timestamp": "2026-04-19T09:38:25.881413+00:00",
+    "version": "1.0"
+  },
+  "key_id": "cross_sdk_test_v063",
+  "public_key_b64": "Bz4CGDV39PewTTD0bTiwuIs7PsblbNtfDDgH16sKo0E="
+}
