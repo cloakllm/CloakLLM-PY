@@ -5,6 +5,129 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] - 2026-04-19
+
+Security-focused release closing 14 audit findings across SSRF, audit-log
+oracles, prompt injection, file permissions, and supply-chain hardening.
+The Article 12 / no-PII-in-logs invariant is structurally enforced across
+more surfaces than ever; HTTP-redirect SSRF, the `sanitized_hash` PII
+oracle, and silent chain restart are all closed.
+
+### Phase 0 — streaming audit gap (the Article 12 must-fix)
+
+- **NEW-3 — All four streaming wrappers write a `desanitize_stream` audit
+  entry per stream lifecycle.** Sync/async × OpenAI/LiteLLM all emit from a
+  `finally:` block — fires on normal completion, mid-stream errors, and
+  generator-close. Even zero-PII streams write an entry (no Article 12 gap).
+  Verified by 14 new tests in `tests/test_streaming_audit.py`.
+- **P0-2** — `_shield` reference + token-map pop happen synchronously in the
+  outer wrapper before the lazy generator returns. Disable-mid-stream race
+  closed.
+- **P0-3 / NEW-4** — `CLOAKLLM_COMPLIANCE_MODE` env normalization handles
+  Unicode whitespace (ZWSP, ZWNJ, ZWJ, BOM) that `str.strip()` misses.
+- **P0-4** — Audit-failure logging via `cloakllm.audit` logger, warn-once
+  per process; never re-raises (stream preserved).
+- **P1-1** — JS streaming preserves `finish_reason` at token boundaries.
+- **P1-2** — JS `_safeErrorTypeName` handles `throw null`, `throw "string"`,
+  `throw 42`, etc.
+- **P2-1** — `bytes_processed` → `chars_processed` rename (deprecated alias
+  preserved).
+- **NEW-9** — `pip-audit` / `npm audit` are now CI-blocking (was advisory).
+  See `CloakLLM/SECURITY_WAIVERS.md` for tracked exceptions.
+
+### Security — high severity
+
+- **H2 — Ollama SSRF residual gaps closed.** New `_ALWAYS_DENY_NETWORKS`
+  blocks cloud metadata IPs (169.254.0.0/16, 100.64.0.0/10, 192.0.0.0/24
+  for Oracle Cloud, fd00:ec2::/64 for AWS IPv6 IMDS) even when
+  `llm_allow_remote=True`. `_normalize_ip` unwraps IPv4-mapped IPv6 so
+  `[::ffff:169.254.169.254]` can't bypass. Per-request DNS re-validation
+  closes the rebinding TOCTOU window.
+- **SEC-1 — HTTP redirect SSRF bypass closed.** `urllib.request.urlopen`
+  followed 3xx redirects by default — a malicious Ollama at a permitted
+  IP could 301-redirect to cloud metadata, bypassing the H2 blocklist.
+  New `_NoRedirectHandler` refuses all 3xx; `_NO_REDIRECT_OPENER` used
+  via the new `LlmDetector._http_open` seam.
+- **H3 — Desanitize disclosure oracle closed.** `tokens_used` and
+  `entity_details` on desanitize audit entries are now filtered to the
+  subset of tokens actually present in the input (was: full token map).
+  `latency_ms` and `timing.*` bucketed to 10ms granularity. Internal
+  `.metrics()` keeps full precision.
+- **G2 — Desanitize `sanitized_hash` PII oracle closed (revised H3).**
+  `sanitized_hash` on desanitize entries now hashes the tokenized input
+  (same as `prompt_hash`), not the restored PII. An attacker can no
+  longer hash candidate PII and confirm matches against audit logs.
+  Pre-v0.6.3 chains continue to verify (verify_chain only re-computes
+  the entry-level chain hash, not field-level hashes).
+- **H4 — Audit chain restart hardened.** Backward-scan recovery finds the
+  last *valid* entry (was: skipped whole files on partial-write tail).
+  New `audit_strict_chain` opt-in raises rather than silently restarting
+  from GENESIS when log files exist but recovery returned nothing —
+  closes the surface where an attacker who can corrupt all logs masks
+  tampering as a routine restart. Partial-write tail detection prepends
+  `\n` on next write to keep chains parseable.
+- **H5 / G1 — Path traversal hardening for `log_dir`,
+  `attestation_key_path`, AND `Shield.export_compliance_config(path)`.**
+  Always rejects NUL bytes and existing symlinks at every path entry
+  point. `audit_strict_paths` opt-in promotes outside-CWD warning to
+  error. `export_compliance_config` opens with `O_NOFOLLOW` + `0o600`
+  to defend against TOCTOU symlink swap between validation and open.
+- **G6 — Python `custom_patterns` name validation parity with JS H9.**
+  `__proto__`, `constructor`, `prototype`, lowercase, and built-in
+  collisions all rejected at `ShieldConfig.__post_init__`.
+- **G7 — Audit dir mode `0o700`, audit log files mode `0o600` on POSIX**
+  so other system users can't read entity hashes / token counts /
+  categories. Windows operators must rely on NTFS ACLs.
+- **I4 — KMS provider lazy-init.** `build_key_provider` short-circuits
+  to `NotImplementedError` BEFORE constructing the provider class
+  (which would import boto3 / google-cloud-kms / azure-keyvault-keys /
+  hvac). Saves ~500ms cold start on Lambda AND keeps those SDKs out of
+  memory while they remain experimental — smaller attack surface.
+
+### Security — informational / observability
+
+- **I3** — Documented v0.6.0 cross-SDK canonical-JSON asymmetry so
+  operators understand legacy-chain verification limits. v0.6.1+ chains
+  are byte-equivalent across SDKs.
+- **I5 / G3 — Lowercase-token warning fires across all desanitize paths.**
+  When the LLM produces a case-variant of a canonical token (e.g.
+  `[email_0]`), substitution still succeeds for back-compat, but a
+  one-time warning per process now fires from BOTH `Tokenizer.detokenize`
+  AND `StreamDesanitizer.feed`. Operators learn to fix prompt drift at
+  the source.
+- **I6 — OIDC trusted publishing.** All three packages publish via
+  PyPI / npm OIDC trusted publishers — no long-lived API tokens in CI.
+  Auto-provenance attestations on npm.
+- **I7 — Cross-SDK round-trip fixtures.** Each SDK ships fixtures the
+  OTHER SDK verifies — Python verifies JS-written audit chains and
+  certificates and vice versa. Future canonical-JSON or signing-scheme
+  drift breaks CI on both sides immediately.
+
+### New API
+
+- **`AuditChainIntegrityError`** — typed exception for chain-recovery
+  failures under `audit_strict_chain=True`. Inherits `RuntimeError` so
+  existing `except RuntimeError:` callers keep working. New callers can
+  pattern-match specifically. Companion `AuditError` and
+  `AuditSchemaViolation` declared (latter wired in v0.7.0). Exported
+  from top-level `cloakllm`.
+
+### Audit-log shape changes (mostly informational)
+
+- Desanitize entries: `entity_count` now means "tokens present in this
+  call" (was: total in map). `tokens_used` and `entity_details`
+  filtered to present-only subset. `sanitized_hash` equals
+  `prompt_hash` (both hash the tokenized input). Reconstruct full map
+  from the matching `sanitize` entry. See `CloakLLM/COMPLIANCE.md` §
+  "Audit-log hash semantics".
+
+### Breaking changes
+
+- External tools that matched `sanitized_hash` against restored PII text
+  on desanitize entries will no longer find matches — that capability
+  WAS the G2 oracle. Switch to matching `prompt_hash` against tokenized
+  text.
+
 ## [0.6.2] - 2026-04-17
 
 ### Fixed (hotfix release for v0.6.1 audit findings)
