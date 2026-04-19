@@ -618,7 +618,7 @@ class TestLlmDetection:
             resp.read.return_value = body
             return resp
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             shield = Shield(config)
             text = "Email john@acme.com about 742 Evergreen Terrace"
             sanitized, token_map = shield.sanitize(text)
@@ -1096,7 +1096,7 @@ class TestCustomLlmCategories:
             resp.read.return_value = body
             return resp
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             sanitized, token_map = shield.sanitize(text)
 
         assert "[PATIENT_ID_0]" in sanitized

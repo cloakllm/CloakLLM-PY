@@ -59,7 +59,7 @@ class TestAvailability:
 
     def test_unavailable_returns_empty(self, detector, caplog):
         """When Ollama is unreachable, detect() returns [] and logs warning."""
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=OSError("Connection refused")):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=OSError("Connection refused")):
             with caplog.at_level(logging.WARNING, logger="cloakllm.llm_detector"):
                 result = detector.detect("My address is 123 Main St", [])
         assert result == []
@@ -67,10 +67,10 @@ class TestAvailability:
 
     def test_available_flag_cached(self, detector):
         """After first check, availability is cached (no second HTTP call)."""
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=OSError("down")):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=OSError("down")):
             detector.detect("text", [])
         # Second call should NOT call urlopen again
-        with patch("cloakllm.llm_detector.urllib.request.urlopen") as mock_open:
+        with patch("cloakllm.llm_detector.LlmDetector._http_open") as mock_open:
             detector.detect("text2", [])
             mock_open.assert_not_called()
 
@@ -92,7 +92,7 @@ class TestSuccessfulDetection:
                 return _mock_tags_ok(req, timeout)
             return _mock_urlopen_factory(ollama_response)(req, timeout)
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             results = detector.detect(text, [])
 
         assert len(results) == 1
@@ -114,7 +114,7 @@ class TestSuccessfulDetection:
                 return _mock_tags_ok(req, timeout)
             return _mock_urlopen_factory(ollama_response)(req, timeout)
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             results = detector.detect(text, [])
 
         assert len(results) == 1
@@ -134,7 +134,7 @@ class TestSuccessfulDetection:
                 return _mock_tags_ok(req, timeout)
             return _mock_urlopen_factory(ollama_response)(req, timeout)
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             results = detector.detect(text, [])
 
         assert len(results) == 2
@@ -160,7 +160,7 @@ class TestFiltering:
                 return _mock_tags_ok(req, timeout)
             return _mock_urlopen_factory(ollama_response)(req, timeout)
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             results = detector.detect(text, [])
 
         assert results == []
@@ -178,7 +178,7 @@ class TestFiltering:
                 return _mock_tags_ok(req, timeout)
             return _mock_urlopen_factory(ollama_response)(req, timeout)
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             results = detector.detect(text, covered)
 
         # ADDRESS should still be detected (not overlapping)
@@ -198,7 +198,7 @@ class TestFiltering:
                 return _mock_tags_ok(req, timeout)
             return _mock_urlopen_factory(ollama_response)(req, timeout)
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             results = detector.detect(text, covered)
 
         assert results == []
@@ -214,7 +214,7 @@ class TestFiltering:
                 return _mock_tags_ok(req, timeout)
             return _mock_urlopen_factory(ollama_response)(req, timeout)
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             results = detector.detect(text, [])
 
         assert results == []
@@ -230,7 +230,7 @@ class TestFiltering:
                 return _mock_tags_ok(req, timeout)
             return _mock_urlopen_factory(ollama_response)(req, timeout)
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             results = detector.detect(text, [])
 
         assert results == []
@@ -246,7 +246,7 @@ class TestFiltering:
                 return _mock_tags_ok(req, timeout)
             return _mock_urlopen_factory(ollama_response)(req, timeout)
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             results = detector.detect(text, [])
 
         assert len(results) == 2
@@ -274,7 +274,7 @@ class TestCache:
             call_count += 1
             return _mock_urlopen_factory(ollama_response)(req, timeout)
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             detector.detect(text, [])
             detector.detect(text, [])
 
@@ -297,7 +297,7 @@ class TestErrorHandling:
             resp.read.return_value = b'{"message":{"content":"not valid json{{{"}}'
             return resp
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             with caplog.at_level(logging.WARNING, logger="cloakllm.llm_detector"):
                 results = detector.detect("Some text with PII", [])
 
@@ -311,7 +311,7 @@ class TestErrorHandling:
                 return _mock_tags_ok(req, timeout)
             raise TimeoutError("Request timed out")
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             with caplog.at_level(logging.WARNING, logger="cloakllm.llm_detector"):
                 results = detector.detect("Some text", [])
 
@@ -327,7 +327,7 @@ class TestErrorHandling:
                 return _mock_tags_ok(req, timeout)
             return _mock_urlopen_factory(ollama_response)(req, timeout)
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             results = detector.detect("Some text", [])
 
         assert results == []
@@ -355,7 +355,7 @@ class TestCustomCategories:
                 return _mock_tags_ok(req, timeout)
             return _mock_urlopen_factory(ollama_response)(req, timeout)
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             results = detector.detect(text, [])
 
         assert len(results) == 1
@@ -410,7 +410,7 @@ class TestCustomCategories:
                 return _mock_tags_ok(req, timeout)
             return _mock_urlopen_factory(ollama_response)(req, timeout)
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             results = detector.detect(text, [])
 
         assert len(results) == 2
@@ -437,7 +437,7 @@ class TestCustomCategories:
                 return _mock_tags_ok(req, timeout)
             return _mock_urlopen_factory(ollama_response)(req, timeout)
 
-        with patch("cloakllm.llm_detector.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("cloakllm.llm_detector.LlmDetector._http_open", side_effect=mock_urlopen):
             results = detector.detect(text, [])
 
         assert len(results) == 1

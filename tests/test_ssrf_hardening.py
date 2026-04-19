@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import socket
 import unittest
+import urllib.error
 from unittest import mock
 
 import pytest
@@ -248,7 +249,7 @@ class TestDnsRebindingMitigation(unittest.TestCase):
         # Now simulate DNS rebinding to IMDS. The next _check_available()
         # must catch this and mark unavailable rather than connect.
         with _patch_resolve([(socket.AF_INET, "169.254.169.254")]):
-            with mock.patch("cloakllm.llm_detector.urllib.request.urlopen") as mock_open:
+            with mock.patch("cloakllm.llm_detector.LlmDetector._http_open") as mock_open:
                 result = det._check_available()
                 self.assertFalse(result)
                 # Critical: the fetch was never attempted.
@@ -265,7 +266,7 @@ class TestDnsRebindingMitigation(unittest.TestCase):
             det._available = True
 
         with _patch_resolve([(socket.AF_INET, "169.254.169.254")]):
-            with mock.patch("cloakllm.llm_detector.urllib.request.urlopen") as mock_open:
+            with mock.patch("cloakllm.llm_detector.LlmDetector._http_open") as mock_open:
                 result = det._query_ollama("some text")
                 self.assertEqual(result, [])
                 # Critical: the fetch was never attempted.
@@ -292,6 +293,87 @@ class TestDenyListCompleteness(unittest.TestCase):
         for ip in ("10.0.0.1", "172.16.0.1", "192.168.1.1"):
             addr = ipaddress.IPv4Address(ip)
             self.assertFalse(any(addr in net for net in _ALWAYS_DENY_NETWORKS), ip)
+
+
+class TestNoHttpRedirectBypass(unittest.TestCase):
+    """v0.6.3 SEC-1: HTTP 3xx redirects MUST be refused.
+
+    The H2 IP blocklist (`_ALWAYS_DENY_NETWORKS`) validates the IP we're
+    about to connect to. But `urllib.request.urlopen()` follows 3xx
+    redirects by default — a malicious Ollama server at a permitted IP
+    can respond with `HTTP/1.1 301 Location: http://169.254.169.254/...`
+    and urllib would follow the redirect WITHOUT re-running our IP
+    validation. Cloud metadata exfiltrated, blocklist bypassed entirely.
+
+    Defense: a custom HTTPRedirectHandler that raises on every 3xx.
+    """
+
+    def test_redirect_handler_refuses_301(self):
+        from cloakllm.llm_detector import _NoRedirectHandler
+        handler = _NoRedirectHandler()
+        with self.assertRaises(urllib.error.URLError) as cm:
+            handler.redirect_request(
+                req=mock.MagicMock(),
+                fp=mock.MagicMock(),
+                code=301,
+                msg="Moved Permanently",
+                headers={},
+                newurl="http://169.254.169.254/latest/meta-data/",
+            )
+        msg = str(cm.exception)
+        self.assertIn("301", msg)
+        self.assertIn("SSRF", msg)
+        self.assertIn("169.254.169.254", msg)
+
+    def test_redirect_handler_refuses_302(self):
+        from cloakllm.llm_detector import _NoRedirectHandler
+        handler = _NoRedirectHandler()
+        with self.assertRaises(urllib.error.URLError):
+            handler.redirect_request(
+                req=mock.MagicMock(), fp=mock.MagicMock(),
+                code=302, msg="Found", headers={},
+                newurl="http://internal.corp/secret",
+            )
+
+    def test_no_redirect_opener_built(self):
+        # Sanity: the module-level opener must include _NoRedirectHandler.
+        from cloakllm.llm_detector import _NO_REDIRECT_OPENER, _NoRedirectHandler
+        has_no_redirect = any(
+            isinstance(h, _NoRedirectHandler)
+            for h in _NO_REDIRECT_OPENER.handlers
+        )
+        self.assertTrue(
+            has_no_redirect,
+            "_NO_REDIRECT_OPENER must install _NoRedirectHandler — otherwise "
+            "the SEC-1 fix is a no-op and redirects would still be followed.",
+        )
+
+    def test_check_available_uses_no_redirect_opener(self):
+        # Integration: when LlmDetector hits a 301-redirecting Ollama,
+        # _check_available must mark unavailable rather than follow the redirect.
+        from cloakllm.llm_detector import LlmDetector
+        from cloakllm.config import ShieldConfig
+
+        with _patch_resolve([(socket.AF_INET, "127.0.0.1")]):
+            cfg = ShieldConfig(llm_detection=True, llm_ollama_url="http://localhost:11434")
+            det = LlmDetector(cfg)
+
+        # Mock the opener's open() to simulate a 301 → IMDS attempt: our
+        # _NoRedirectHandler raises URLError before urllib can follow.
+        with _patch_resolve([(socket.AF_INET, "127.0.0.1")]):
+            from cloakllm.llm_detector import _NO_REDIRECT_OPENER
+            with mock.patch.object(
+                _NO_REDIRECT_OPENER, "open",
+                side_effect=urllib.error.URLError(
+                    "CloakLLM: Ollama server returned a 301 redirect — refused for SSRF"
+                ),
+            ):
+                ok = det._check_available()
+                self.assertFalse(
+                    ok,
+                    "redirect-refusing opener must mark Ollama unavailable, "
+                    "not silently fall through to urllib's default redirect.",
+                )
 
 
 if __name__ == "__main__":

@@ -55,6 +55,11 @@ from cloakllm.token_spec import (
     CLOAKLLM_TOKEN_PATTERN,
     MAX_TOKEN_LENGTH,
 )
+from cloakllm.exceptions import (
+    AuditError,
+    AuditChainIntegrityError,
+    AuditSchemaViolation,
+)
 
 __all__ = [
     "Shield",
@@ -90,4 +95,8 @@ __all__ = [
     "AzureKeyVaultProvider",
     "HashicorpVaultProvider",
     "build_key_provider",
+    # v0.6.3 G4: typed exceptions
+    "AuditError",
+    "AuditChainIntegrityError",
+    "AuditSchemaViolation",
 ]

@@ -116,6 +116,44 @@ _ALWAYS_DENY_NETWORKS = [
 ]
 
 
+# v0.6.3 SEC-1: HTTP redirect SSRF bypass.
+#
+# urllib.request.urlopen() installs an HTTPRedirectHandler by default — a
+# malicious Ollama server at a permitted IP can respond with
+#     HTTP/1.1 301 Moved Permanently
+#     Location: http://169.254.169.254/latest/meta-data/iam/...
+# and urllib will follow the redirect WITHOUT passing the new URL through
+# our `_validate_ollama_url` / `_revalidate_url` chain. The H2 IP blocklist
+# (cloud metadata, multicast, etc.) is silently bypassed for any Ollama
+# server that returns a redirect.
+#
+# Defense: build an opener with a custom HTTPRedirectHandler that REFUSES
+# all redirects. The Ollama API never legitimately returns 3xx for /api/tags
+# or /api/chat — any redirect is either misconfiguration or an attack.
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """v0.6.3 SEC-1: refuse all 3xx redirects to prevent SSRF bypass.
+
+    A malicious Ollama at a permitted IP could redirect us to cloud
+    metadata or any internal service. Turning redirects off forces the
+    request to terminate at the validated IP/host.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.URLError(
+            f"CloakLLM: Ollama server returned a {code} redirect to "
+            f"{newurl!r}. Refusing for SSRF protection — the H2 IP blocklist "
+            f"is bypassable if redirects are followed. If your Ollama "
+            f"deployment legitimately needs redirects, configure it to serve "
+            f"the final URL directly."
+        )
+
+
+# Module-level opener: built once, reused for all Ollama HTTP calls in this
+# process. Including the standard handlers ensures cookies/auth/etc still
+# work normally — only redirects are refused.
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler())
+
+
 def _normalize_ip(ip: ipaddress._BaseAddress) -> ipaddress._BaseAddress:
     """v0.6.3 H2: Unwrap IPv4-mapped IPv6 (`::ffff:x.y.z.w`) to its IPv4 form
     so range checks against IPv4 deny lists still apply.
@@ -287,6 +325,14 @@ class LlmDetector:
     def _effective_categories(self) -> frozenset[str]:
         return LLM_CATEGORIES | frozenset(self._custom_categories)
 
+    def _http_open(self, req, *, timeout):
+        """v0.6.3 SEC-1: single seam for all HTTP calls so tests can patch
+        one method, and SEC-1's no-redirect handler is enforced
+        consistently. Production code MUST call this — never
+        urllib.request.urlopen directly — so a malicious Ollama can't
+        301-redirect us to cloud metadata."""
+        return _NO_REDIRECT_OPENER.open(req, timeout=timeout)
+
     def _revalidate_url(self) -> None:
         """v0.6.3 H2: Re-resolve the base URL's hostname and apply the same
         deny/private-IP checks as init-time validation.
@@ -308,7 +354,9 @@ class LlmDetector:
         try:
             self._revalidate_url()  # v0.6.3 H2: DNS rebinding mitigation
             req = urllib.request.Request(f"{self._base_url}/api/tags", method="GET")
-            urllib.request.urlopen(req, timeout=3)
+            # v0.6.3 SEC-1: route through _http_open so the no-redirect opener
+            # is always used and tests have a single patchable seam.
+            self._http_open(req, timeout=3)
             self._available = True
         except Exception:
             logger.warning("Ollama not available at %s — LLM detection disabled", self._base_url)
@@ -366,7 +414,9 @@ class LlmDetector:
 
         try:
             self._revalidate_url()  # v0.6.3 H2: DNS rebinding mitigation
-            resp = urllib.request.urlopen(req, timeout=self._timeout)
+            # v0.6.3 SEC-1: route through _http_open (same seam as
+            # _check_available — tests patch one method, redirects refused).
+            resp = self._http_open(req, timeout=self._timeout)
             body = json.loads(resp.read())
             content = body.get("message", {}).get("content", "{}")
             parsed = json.loads(content)

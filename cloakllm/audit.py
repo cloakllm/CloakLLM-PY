@@ -312,7 +312,12 @@ class AuditLogger:
                 self._seq = last_entry["seq"] + 1
                 self._prev_hash = last_entry["entry_hash"]
             elif log_files and getattr(self.config, "audit_strict_chain", False):
-                raise RuntimeError(
+                # v0.6.3 G4: typed exception so callers can pattern-match
+                # specifically on chain integrity failure rather than catching
+                # all RuntimeErrors. AuditChainIntegrityError IS a RuntimeError
+                # so existing `except RuntimeError:` callers still work.
+                from cloakllm.exceptions import AuditChainIntegrityError
+                raise AuditChainIntegrityError(
                     f"CloakLLM audit chain recovery failed: log dir "
                     f"{self._log_dir!s} contains {len(log_files)} file(s) but "
                     f"none have a recoverable trailing entry. Refusing to "
