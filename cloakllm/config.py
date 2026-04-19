@@ -129,6 +129,15 @@ class ShieldConfig:
     audit_strict_chain: bool = field(
         default_factory=lambda: os.getenv("CLOAKLLM_AUDIT_STRICT_CHAIN", "false").lower() == "true"
     )
+    # v0.6.3 H5: When True, the existing "log_dir is outside CWD" advisory
+    # warning becomes a hard ValueError. Defaults to False for backward-compat.
+    # Symlink rejection and null-byte rejection are ALWAYS on regardless of
+    # this flag — they're security invariants, not policy choices. Set True
+    # (or env CLOAKLLM_AUDIT_STRICT_PATHS=true) for deployments that want
+    # to enforce log_dir containment.
+    audit_strict_paths: bool = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_AUDIT_STRICT_PATHS", "false").lower() == "true"
+    )
     # --- OpenTelemetry ---
     otel_enabled: bool = field(
         default_factory=lambda: os.getenv("CLOAKLLM_OTEL_ENABLED", "false").lower() == "true"
@@ -240,23 +249,55 @@ class ShieldConfig:
             if model:
                 self.spacy_model = model
 
-        # Path validation
+        # Path validation (v0.6.3 H5: hardened)
         import warnings as _warnings
-        _resolved_log = self.log_dir.resolve()
         _cwd = Path.cwd().resolve()
-        try:
-            _resolved_log.relative_to(_cwd)
-        except ValueError:
-            _warnings.warn(
-                f"CloakLLM: log_dir '{_resolved_log}' is outside the current working directory.",
-                RuntimeWarning, stacklevel=2,
-            )
-        if self.attestation_key_path:
-            _resolved_key = Path(self.attestation_key_path).resolve()
-            try:
-                _resolved_key.relative_to(_cwd)
-            except ValueError:
-                _warnings.warn(
-                    f"CloakLLM: attestation_key_path '{_resolved_key}' is outside the current working directory.",
-                    RuntimeWarning, stacklevel=2,
+
+        def _validate_path(path_obj: Path, name: str, *, is_dir: bool) -> None:
+            """v0.6.3 H5: Centralized path validation. Always rejects:
+              * paths containing NUL bytes (defense vs C-string truncation
+                in downstream tools that consume audit log filenames)
+              * paths that exist as symlinks (attacker-replaceable surface
+                for redirecting audit writes)
+            Optionally (audit_strict_paths=True): rejects paths outside CWD.
+            Otherwise emits a RuntimeWarning for the outside-CWD case.
+            """
+            raw = str(path_obj)
+            if "\x00" in raw:
+                raise ValueError(
+                    f"CloakLLM: {name} '{raw!r}' contains a NUL byte. "
+                    f"Refusing for security."
                 )
+            # is_symlink() returns True iff the path itself is a symlink.
+            # A symlink-replaced log_dir lets an attacker redirect writes
+            # to a directory THEY control AND have us read THEIR files
+            # during chain recovery. Always reject.
+            try:
+                if path_obj.is_symlink():
+                    raise ValueError(
+                        f"CloakLLM: {name} '{path_obj}' is a symlink "
+                        f"(target: {os.readlink(path_obj)!r}). Refusing for "
+                        f"security — set the config to the real destination."
+                    )
+            except OSError:
+                pass  # path doesn't exist or can't be stat'd — let mkdir/open handle it
+
+            resolved = path_obj.resolve()
+            try:
+                resolved.relative_to(_cwd)
+            except ValueError:
+                msg = (
+                    f"CloakLLM: {name} '{resolved}' is outside the current "
+                    f"working directory."
+                )
+                if self.audit_strict_paths:
+                    raise ValueError(msg + " (audit_strict_paths=True)")
+                _warnings.warn(msg, RuntimeWarning, stacklevel=3)
+
+        _validate_path(self.log_dir, "log_dir", is_dir=True)
+        if self.attestation_key_path:
+            _validate_path(
+                Path(self.attestation_key_path),
+                "attestation_key_path",
+                is_dir=False,
+            )
