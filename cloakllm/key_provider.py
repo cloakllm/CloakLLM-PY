@@ -373,6 +373,16 @@ _PROVIDER_REGISTRY = {
     "hashicorp_vault": HashicorpVaultProvider,
 }
 
+# v0.6.3 I4: providers that are scaffolded but NOT yet implemented in v0.6.x.
+# `build_key_provider` short-circuits to NotImplementedError BEFORE constructing
+# the class, so the cloud SDKs (boto3, google-cloud-kms, azure-keyvault-keys,
+# hvac) are never imported in production for users who configured one of these
+# providers. This both saves the import cost (~500ms cold start for boto3 on
+# Lambda) and keeps the SDKs out of memory — smaller attack surface for any
+# CVEs in those packages while we can't actually use them. v0.7.0 will remove
+# entries from this set as each provider is rebuilt.
+_DISABLED_KMS_PROVIDERS = frozenset(_PROVIDER_REGISTRY.keys())
+
 
 _KMS_EXPERIMENTAL_MSG = (
     "KMS provider {provider!r} is EXPERIMENTAL in v0.6.x and does NOT produce "
@@ -409,13 +419,25 @@ def build_key_provider(provider_name: str, key_id: str) -> KeyProvider:
     """
     Factory: instantiate the appropriate KMS-backed KeyProvider.
 
-    Raises ValueError for unknown providers, ImportError (with install hint)
-    if the provider's SDK is not installed.
+    v0.6.3 I4: providers in `_DISABLED_KMS_PROVIDERS` short-circuit to
+    NotImplementedError BEFORE the provider class is constructed. This avoids
+    importing the cloud SDK (boto3, google-cloud-kms, etc.) in production
+    even when the user has configured a disabled provider — saves the SDK
+    import cost AND keeps the SDKs out of memory while they can't be used.
+
+    Raises:
+      ValueError on unknown provider names.
+      NotImplementedError when a disabled provider is requested (v0.6.x scaffold).
+      ImportError (from the constructor) if a non-disabled provider is requested
+        and its SDK is not installed.
     """
     if provider_name not in _PROVIDER_REGISTRY:
         raise ValueError(
             f"Unknown attestation_key_provider '{provider_name}'. "
             f"Must be one of: {list(_PROVIDER_REGISTRY)}"
         )
+    # v0.6.3 I4: short-circuit BEFORE constructing the class.
+    if provider_name in _DISABLED_KMS_PROVIDERS:
+        _kms_not_implemented(provider_name)
     cls = _PROVIDER_REGISTRY[provider_name]
     return cls(key_id=key_id)
