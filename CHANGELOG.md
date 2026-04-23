@@ -5,6 +5,56 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.4] - 2026-04-20
+
+Polish release — the v0.6.4 round-up of items the v0.6.3 review pass
+parked. No new security exposures opened or closed; everything here
+is correctness, hygiene, and developer ergonomics. Safe drop-in
+upgrade from 0.6.3.
+
+### Hardening
+
+- **G8 — Timing-safe hash comparison in `verify_chain`.** `stored_hash != recomputed`
+  short-circuits at the first mismatching hex byte, exposing a microsecond
+  timing channel for attackers with many verify calls. Replaced with
+  `hmac.compare_digest` (constant-time for equal-length inputs). Defense-
+  in-depth — `verify_chain` is not a hot endpoint, but compliance deployments
+  may expose it via a public verification API.
+- **G13 — Server logs no longer include `str(e)` by default.** Seven MCP tool
+  exception handlers (`sanitize`, `sanitize_batch`, `desanitize`,
+  `desanitize_batch`, `analyze`, `analyze_batch`, `analyze_context_risk`)
+  now log only the exception type. Set `CLOAKLLM_DEBUG=1` to opt back in
+  to full message logging for diagnosis. Closes a residual avenue where
+  cloakllm-py exception text could carry input fragments into operator
+  logs.
+
+### Correctness
+
+- **BUG-3 — `_ENTRY_ALLOWED_KEYS` derived from `AuditEntry` dataclass
+  fields.** Previously the allow-list and the dataclass were maintained
+  separately — adding a field to one and forgetting the other would
+  silently drop fields or break entry construction. Now derived via
+  `frozenset(f.name for f in fields(AuditEntry))` so the two cannot
+  drift.
+- **BUG-5 — `is not None` guard in `litellm_middleware.disable()`.**
+  Truthy check on `_original_acompletion` worked for callables but
+  was semantically imprecise. Now explicit `is not None`.
+
+### New typed exception (informational)
+
+(No new types in v0.6.4 itself; the `AuditChainIntegrityError` /
+`AuditError` / `AuditSchemaViolation` shipped in v0.6.3.)
+
+### Test isolation
+
+- New `tests/conftest.py` autouse fixture resets module-level one-shot
+  warning gates between tests (`tokenizer._CASE_MISMATCH_WARNED`,
+  middleware `_audit_failure_warned_once`). The two flaky tests
+  documented in v0.6.3's commit messages (`test_verify_audit_compliance_report_compliant`,
+  `TestLiteLLMSyncStreaming::test_sync_streaming_desanitizes`) now pass
+  cleanly under full-suite ordering. Suite total: 568 passed, 9 skipped
+  (was 566 / 9 with 2 flakes in v0.6.3).
+
 ## [0.6.3] - 2026-04-19
 
 Security-focused release closing 14 audit findings across SSRF, audit-log

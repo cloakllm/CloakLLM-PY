@@ -12,11 +12,12 @@ Storage: JSONL (one JSON object per line) for easy parsing and streaming.
 from __future__ import annotations
 
 import hashlib
+import hmac  # v0.6.4 G8: timing-safe hash comparison in verify_chain
 import json
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, fields  # v0.6.4 BUG-3: derive _ENTRY_ALLOWED_KEYS
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -37,15 +38,15 @@ _PII_FORBIDDEN_KEYS = ("original_value", "original_text", "raw_text", "plain_tex
 # Paradox positioning into "CloakLLM resolves the paradox if you turn on the right flag."
 # Users putting raw PII into metadata were always violating the contract.
 
-# Allow-list of top-level audit-entry keys, mirrored from AuditEntry dataclass.
-_ENTRY_ALLOWED_KEYS = frozenset({
-    "seq", "event_id", "timestamp", "event_type", "model", "provider",
-    "entity_count", "categories", "tokens_used", "prompt_hash", "sanitized_hash",
-    "latency_ms", "mode", "entity_details", "timing", "certificate_hash",
-    "key_id", "prev_hash", "entry_hash", "metadata", "risk_assessment",
-    # v0.6.0 compliance-mode fields
-    "compliance_version", "article_ref", "retention_hint_days", "pii_in_log",
-})
+# v0.6.4 BUG-3: derived from AuditEntry dataclass below to keep them in sync.
+# The actual frozenset is built at module load time AFTER AuditEntry is defined
+# (search for "_ENTRY_ALLOWED_KEYS = frozenset"). Maintaining two parallel
+# lists invited drift: a field added to AuditEntry but not the allow-list
+# would be rejected by the validator; a key added to the allow-list but not
+# the dataclass would TypeError at AuditEntry(**entry_data) construction.
+# Forward declaration so functions defined before the dataclass can reference
+# the name; actual assignment overwrites this empty frozenset further down.
+_ENTRY_ALLOWED_KEYS: frozenset[str] = frozenset()
 
 # Allow-list of entity_details element keys. **Verified against actual code emission**
 # (cloakllm-py F3 audit, 2026-04-16): tokenizer.py emits 7 keys, plus entity_hash
@@ -198,6 +199,13 @@ class AuditEntry:
     article_ref: Optional[list[str]] = None       # Articles satisfied, e.g. ["EU_AI_Act_Art_12", ...]
     retention_hint_days: Optional[int] = None     # Recommended log retention period
     pii_in_log: Optional[bool] = None             # Always False in compliance mode (asserted)
+
+
+# v0.6.4 BUG-3: single source of truth — derive the allow-list from the
+# dataclass fields. Adding/removing a field on AuditEntry now automatically
+# updates the validator's allow-list, eliminating the drift hazard from the
+# v0.6.x parallel maintenance pattern.
+_ENTRY_ALLOWED_KEYS = frozenset(f.name for f in fields(AuditEntry))
 
 
 class AuditLogger:
@@ -599,7 +607,14 @@ class AuditLogger:
                     # Recompute entry hash (legacy_canonical thread-through)
                     stored_hash = entry.pop("entry_hash", "")
                     recomputed = self._compute_hash(entry, legacy_canonical=legacy_canonical)
-                    if stored_hash != recomputed:
+                    # v0.6.4 G8: timing-safe comparison. The byte-by-byte != on
+                    # hex strings short-circuits at the first mismatching byte —
+                    # an attacker with many verify_chain calls and microsecond
+                    # timing could in principle infer hash bytes. hmac.compare_digest
+                    # is constant-time for equal-length inputs. Defense-in-depth
+                    # for compliance deployments where verify_chain is exposed
+                    # via a public API endpoint.
+                    if not hmac.compare_digest(stored_hash, recomputed):
                         errors.append(
                             f"{fpath.name}:{line_num} seq={entry.get('seq')} — "
                             f"Entry tampered: stored_hash={stored_hash[:16]}..., "

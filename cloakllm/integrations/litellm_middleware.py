@@ -263,9 +263,13 @@ def disable():
 
     try:
         import litellm
-        if _original_completion:
+        # v0.6.4 BUG-5: explicit `is not None` guards. Truthy checks here are
+        # semantically equivalent for callables (always truthy) but `is not None`
+        # is precise — defends against a future case where the original is set
+        # to a sentinel falsy object (e.g., a Mock with __bool__ returning False).
+        if _original_completion is not None:
             litellm.completion = _original_completion
-        if _original_acompletion:
+        if _original_acompletion is not None:
             litellm.acompletion = _original_acompletion
     except ImportError:
         pass
