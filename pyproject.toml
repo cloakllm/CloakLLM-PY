@@ -29,9 +29,12 @@ dependencies = [
 # v0.6.1 H6: bumped litellm floor to 1.83.0 (CVE-2026-35029, -35030, GHSA-69x8-hrgq-fjj8 fixed in 1.83.0).
 # v0.6.3 P0-1: pin aiohttp>=3.13.4 (litellm transitive) — fixes 10 CVEs in aiohttp 3.13.3
 # (CVE-2026-34513..34520, CVE-2026-22815, CVE-2026-34525). All fixed in aiohttp 3.13.4.
+# post-v0.6.4: pin python-dotenv>=1.2.2 (litellm transitive) — fixes CVE-2026-28684.
+# Will roll into v0.6.5; metadata-only update unblocks CI in the meantime.
 litellm = [
     "litellm>=1.83.0,<2.0.0",
     "aiohttp>=3.13.4",
+    "python-dotenv>=1.2.2",
 ]
 attestation = ["pynacl>=1.5.0,<2.0.0"]
 kms = [
