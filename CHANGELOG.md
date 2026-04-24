@@ -5,6 +5,22 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Targeted for v0.6.5 (next versioned release).
+
+### Security
+
+- **chore: bump litellm-extras `python-dotenv` floor to `>=1.2.2`
+  (CVE-2026-28684).** python-dotenv 1.0.1 (transitive via `litellm`)
+  has a known CVE; fix landed in 1.2.2. The pin already lives on `main`
+  in `pyproject.toml` (commit `0cafb5b`, 2026-04-24) so CI's blocking
+  pip-audit passes, but the published v0.6.4 wheel was built before
+  the pin existed and still references the old metadata. Anyone running
+  `pip install cloakllm[litellm]==0.6.4` today resolves to the
+  vulnerable python-dotenv unless they pin it themselves. v0.6.5 will
+  republish with the pin baked into the wheel metadata.
+
 ## [0.6.4] - 2026-04-20
 
 Polish release — the v0.6.4 round-up of items the v0.6.3 review pass
