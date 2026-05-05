@@ -53,3 +53,31 @@ jobs:
           pip-audit \
             --ignore-vuln ECHO-ffe1-1d3c-d9bc \
             --ignore-vuln ECHO-7db2-03aa-5591
+
+      # v0.6.5: Build the wheel and import it from a fresh venv. The cloakllm
+      # py CI already exercises real spaCy / litellm via `pip install -e ...`
+      # so the upstream-API-drift class of bug is mostly caught — but a wheel
+      # built with broken metadata (missing files, wrong package_data) would
+      # only surface on user installs. This step closes that gap.
+      #
+      # Running on Python 3.12 only (one-shot smoke; matrix coverage above
+      # already exercises 3.10/3.11/3.12 for the test suite).
+      - name: Build wheel + import-smoke from clean venv
+        if: matrix.python-version == '3.12'
+        run: |
+          pip install --upgrade build
+          python -m build --wheel
+          python -m venv /tmp/wheel-test-venv
+          /tmp/wheel-test-venv/bin/pip install --quiet --upgrade pip
+          /tmp/wheel-test-venv/bin/pip install --quiet dist/cloakllm-*.whl
+          /tmp/wheel-test-venv/bin/python -m spacy download en_core_web_sm
+          /tmp/wheel-test-venv/bin/python -c "
+          import cloakllm
+          from cloakllm import Shield, ShieldConfig, AuditChainIntegrityError
+          shield = Shield(ShieldConfig(audit_enabled=False))
+          sanitized, tm = shield.sanitize('Email me at john@example.com please')
+          assert '[EMAIL_0]' in sanitized, f'expected [EMAIL_0] in {sanitized!r}'
+          restored = shield.desanitize(sanitized, tm)
+          assert 'john@example.com' in restored, f'round-trip failed: {restored!r}'
+          print(f'install-smoke: OK — cloakllm {cloakllm.__version__} round-trip + AuditChainIntegrityError importable')
+          "

@@ -5,21 +5,38 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.5] - 2026-04-24
 
-Targeted for v0.6.5 (next versioned release).
+Drop-in safe from v0.6.4. Carries the post-v0.6.4 `python-dotenv` CVE
+pin into a published wheel and adds a CI install-test guard born from
+the v0.6.4.post1 hotfix postmortem.
 
 ### Security
 
-- **chore: bump litellm-extras `python-dotenv` floor to `>=1.2.2`
+- **`python-dotenv >= 1.2.2` pinned in the `litellm` extras
   (CVE-2026-28684).** python-dotenv 1.0.1 (transitive via `litellm`)
-  has a known CVE; fix landed in 1.2.2. The pin already lives on `main`
-  in `pyproject.toml` (commit `0cafb5b`, 2026-04-24) so CI's blocking
-  pip-audit passes, but the published v0.6.4 wheel was built before
-  the pin existed and still references the old metadata. Anyone running
-  `pip install cloakllm[litellm]==0.6.4` today resolves to the
-  vulnerable python-dotenv unless they pin it themselves. v0.6.5 will
-  republish with the pin baked into the wheel metadata.
+  has a known CVE; fix landed in 1.2.2. The pin landed on `main` in
+  `pyproject.toml` on 2026-04-24 (commit `0cafb5b`) so CI's blocking
+  pip-audit could pass, but the published v0.6.4 wheel was built
+  before the pin existed and still referenced the vulnerable version.
+  v0.6.5 republishes with the pin baked into wheel metadata —
+  `pip install cloakllm[litellm]==0.6.5` now resolves to the safe
+  python-dotenv automatically.
+
+### CI / supply-chain hardening
+
+- **New install-smoke step in `ci.yml`.** Builds the wheel via
+  `python -m build`, installs it into a fresh venv (no test mocks,
+  no `pip install -e .` shortcuts), downloads the spaCy model, and
+  runs an end-to-end sanitize/desanitize round-trip plus the
+  `AuditChainIntegrityError` import. Catches the class of regression
+  where the wheel's metadata/contents diverge from what the source
+  tests exercise — same shape as the FastMCP rename that broke
+  `cloakllm-mcp 0.6.4` for fresh installs. Runs on Python 3.12 only
+  (the matrix above already covers test-suite breadth across
+  3.10/3.11/3.12).
+
+## [0.6.4] - 2026-04-20
 
 ## [0.6.4] - 2026-04-20
 
