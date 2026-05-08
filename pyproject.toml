@@ -45,7 +45,7 @@ kms = [
     "hvac>=2.0,<3.0.0",
 ]
 # v0.6.1 H6: bumped cryptography floor to 46.0.7 (CVE-2026-26007, -34073, -39892 fixed in 46.0.7).
-dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "cryptography>=46.0.7,<47.0.0", "pip-audit>=2.7"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "cryptography>=46.0.7,<49.0.0", "pip-audit>=2.7"]
 all = ["opentelemetry-api>=1.20,<2.0.0", "opentelemetry-sdk>=1.20,<2.0.0"]
 
 [project.scripts]
