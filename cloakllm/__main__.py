@@ -76,7 +76,7 @@ def cmd_scan(args):
         if risk["warnings"]:
             print(f"  Warnings:")
             for w in risk["warnings"]:
-                print(f"    • {w}")
+                print(f"    * {w}")
 
 
 def cmd_verify(args):
@@ -109,12 +109,14 @@ def cmd_verify(args):
     print(f"Verifying audit chain in {log_dir}...")
     is_valid, errors, final_seq = logger.verify_chain(legacy_canonical=legacy)
 
+    # v0.7.0 AUDIT-11: ASCII-only output. Em-dash + emoji crash CLI output on
+    # Windows non-UTF-8 console codepages (cp1255 Hebrew, cp932 Japanese, etc.).
     if is_valid:
-        print("✅ Audit chain integrity verified — no tampering detected.")
+        print("[OK] Audit chain integrity verified -- no tampering detected.")
     else:
-        print(f"❌ CHAIN INTEGRITY FAILURE — {len(errors)} error(s):\n")
+        print(f"[FAIL] CHAIN INTEGRITY FAILURE -- {len(errors)} error(s):\n")
         for err in errors:
-            print(f"  • {err}")
+            print(f"  * {err}")
         sys.exit(1)
 
 
@@ -135,7 +137,7 @@ def cmd_stats(args):
 def main():
     parser = argparse.ArgumentParser(
         prog="cloakllm",
-        description="CloakLLM — AI Compliance Middleware CLI",
+        description="CloakLLM -- AI Compliance Middleware CLI",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 

@@ -132,5 +132,86 @@ class TestVerifyPythonOwnFixtures(unittest.TestCase):
         self.assertTrue(cert.verify(public_key))
 
 
+# ---------------------------------------------------------------------------
+# v0.7.0 A4a-7: cross-SDK verification of the BIAS-DETECTION audit chain.
+# Same shape as the regular-chain tests above, but the fixture file contains
+# the four bias_* event types so canonicalization regressions in `bias_context`
+# break CI on both SDKs immediately.
+# ---------------------------------------------------------------------------
+
+
+_BIAS_EVENT_TYPES = (
+    "bias_session_start",
+    "bias_pseudonymise",
+    "bias_finding",
+    "bias_session_end",
+)
+
+
+class TestVerifyJsBiasAuditChain(unittest.TestCase):
+    """Python verifies the bias-detection chain written by JS."""
+
+    def setUp(self):
+        self.fixture = FIXTURES / "audit_chain_bias_js.jsonl"
+        if not self.fixture.exists():
+            self.skipTest(
+                "audit_chain_bias_js.jsonl missing — regenerate via "
+                "node ../cloakllm-js/test/fixtures/generate_cross_sdk_fixtures.js"
+            )
+
+    def test_js_bias_chain_passes_python_verify_chain(self):
+        tmp = Path(tempfile.mkdtemp(prefix="cloakllm-i7-py-vs-js-bias-"))
+        try:
+            shutil.copy(self.fixture, tmp / "audit_2026-04-19.jsonl")
+            shield = Shield(ShieldConfig(log_dir=tmp, audit_enabled=False))
+            ok, errors, final_seq = shield.audit.verify_chain()
+            self.assertTrue(
+                ok,
+                f"JS bias chain failed Python verify_chain. "
+                f"This indicates the bias_context canonical JSON diverged "
+                f"between SDKs.\nErrors: {errors}\nFinal seq: {final_seq}",
+            )
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_js_bias_chain_has_expected_event_shape(self):
+        lines = [
+            line.strip()
+            for line in self.fixture.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        entries = [json.loads(line) for line in lines]
+        # 4 entries in the order start → pseudonymise → finding → end.
+        self.assertEqual(
+            tuple(e["event_type"] for e in entries), _BIAS_EVENT_TYPES,
+            f"unexpected event_type order in JS bias chain: "
+            f"{[e['event_type'] for e in entries]}",
+        )
+        for e in entries:
+            self.assertIn("EU_AI_Act_Art_4a", e["article_ref"])
+            self.assertEqual(e["compliance_version"], "eu_ai_act_article12_v1")
+            self.assertFalse(e["pii_in_log"])
+            self.assertIn("session_id", e["bias_context"])
+
+
+class TestVerifyPythonOwnBiasFixture(unittest.TestCase):
+    """Sanity: the Python-written bias chain self-verifies in Python."""
+
+    def test_python_bias_chain_self_verifies(self):
+        f = FIXTURES / "audit_chain_bias_py.jsonl"
+        if not f.exists():
+            self.skipTest("audit_chain_bias_py.jsonl not generated yet")
+        tmp = Path(tempfile.mkdtemp(prefix="cloakllm-i7-py-bias-self-"))
+        try:
+            shutil.copy(f, tmp / "audit_2026-04-19.jsonl")
+            shield = Shield(ShieldConfig(log_dir=tmp, audit_enabled=False))
+            ok, errors, _ = shield.audit.verify_chain()
+            self.assertTrue(
+                ok, f"Python self bias-chain failed: {errors}",
+            )
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

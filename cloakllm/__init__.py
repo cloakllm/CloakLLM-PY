@@ -19,7 +19,7 @@ Standalone usage:
     # sanitized: "Send email to [EMAIL_0] about [ORG_0]"
 """
 
-__version__ = "0.6.5"
+__version__ = "0.7.0"
 
 from cloakllm.shield import Shield
 from cloakllm.config import ShieldConfig
@@ -52,6 +52,7 @@ from cloakllm.token_spec import (
     validate_category_name,
     is_redacted_token,
     BUILTIN_CATEGORIES,
+    SPECIAL_CATEGORY_CATEGORIES,
     CLOAKLLM_TOKEN_PATTERN,
     MAX_TOKEN_LENGTH,
 )
@@ -59,7 +60,12 @@ from cloakllm.exceptions import (
     AuditError,
     AuditChainIntegrityError,
     AuditSchemaViolation,
+    BiasDetectionError,
+    BiasDetectionScopeError,
+    BiasDetectionStateError,
+    BiasDetectionTimeoutError,
 )
+from cloakllm.bias_detection import BiasDetectionSession
 
 __all__ = [
     "Shield",
@@ -82,6 +88,7 @@ __all__ = [
     "validate_category_name",
     "is_redacted_token",
     "BUILTIN_CATEGORIES",
+    "SPECIAL_CATEGORY_CATEGORIES",
     "CLOAKLLM_TOKEN_PATTERN",
     "MAX_TOKEN_LENGTH",
     "DetectorBackend",
@@ -99,4 +106,10 @@ __all__ = [
     "AuditError",
     "AuditChainIntegrityError",
     "AuditSchemaViolation",
+    # v0.7.0 A4a: BiasDetectionSession (Article 4a)
+    "BiasDetectionSession",
+    "BiasDetectionError",
+    "BiasDetectionScopeError",
+    "BiasDetectionStateError",
+    "BiasDetectionTimeoutError",
 ]

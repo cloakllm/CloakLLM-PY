@@ -168,9 +168,12 @@ def test_compliance_summary_structure():
     }
     assert article_names == expected
 
-    # Article 4a is partial in v0.6.0
+    # v0.7.0: Article 4a is now "satisfied" via BiasDetectionSession (was
+    # "partial" in v0.6.x when only tokenization-as-pseudonymisation was
+    # documented).
     art4a = next(a for a in summary["articles_addressed"] if a["article"] == "EU_AI_Act_Art_4a")
-    assert art4a["status"] == "partial"
+    assert art4a["status"] == "satisfied"
+    assert "BiasDetectionSession" in art4a["notes"]
 
     assert summary["config_snapshot"]["compliance_mode"] == "eu_ai_act_article12"
     assert summary["config_snapshot"]["retention_hint_days"] == 180

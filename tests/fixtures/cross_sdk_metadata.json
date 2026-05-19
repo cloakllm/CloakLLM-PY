@@ -1,4 +1,19 @@
 {
+  "javascript_bias_chain": {
+    "chain_errors": [],
+    "chain_valid": true,
+    "entries": 4,
+    "event_types": [
+      "bias_session_start",
+      "bias_pseudonymise",
+      "bias_finding",
+      "bias_session_end"
+    ],
+    "final_seq": 3,
+    "format": "jsonl",
+    "writer_sdk": "javascript",
+    "writer_version": "0.7.0"
+  },
   "javascript_certificate": {
     "entity_count": 1,
     "input_hash": "4fb7e3a4294e6085f1e05587e0f03584d9d29ea5fc9ee4d8761018ac06e66255",
@@ -15,6 +30,21 @@
     "format": "jsonl",
     "writer_sdk": "javascript",
     "writer_version": "0.6.3"
+  },
+  "python_bias_chain": {
+    "chain_errors": [],
+    "chain_valid": true,
+    "entries": 4,
+    "event_types": [
+      "bias_session_start",
+      "bias_pseudonymise",
+      "bias_finding",
+      "bias_session_end"
+    ],
+    "final_seq": 3,
+    "format": "jsonl",
+    "writer_sdk": "python",
+    "writer_version": "0.7.0"
   },
   "python_certificate": {
     "entity_count": 1,
@@ -33,5 +63,5 @@
     "writer_sdk": "python",
     "writer_version": "0.6.3"
   },
-  "regenerated_at_utc": "2026-04-19"
+  "regenerated_at_utc": "2026-05-19"
 }

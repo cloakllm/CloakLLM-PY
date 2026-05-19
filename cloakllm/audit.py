@@ -26,14 +26,14 @@ from cloakllm._canonical import canonical_json, _legacy_canonical_json
 from cloakllm.config import ShieldConfig
 
 
-GENESIS_HASH = "0" * 64  # SHA-256 of nothing — the chain anchor
+GENESIS_HASH = "0" * 64  # SHA-256 of nothing -- the chain anchor
 
 
 _PII_FORBIDDEN_KEYS = ("original_value", "original_text", "raw_text", "plain_text", "value")
 
 
 # v0.6.1 B3: allow-list schema validator. Always-on (not gated on compliance_mode).
-# The CLAUDE.md invariant — "CloakLLM audit logs must contain zero original PII" —
+# The CLAUDE.md invariant -- "CloakLLM audit logs must contain zero original PII" --
 # is a project-wide guarantee. Gating it on a flag would collapse the Article 12
 # Paradox positioning into "CloakLLM resolves the paradox if you turn on the right flag."
 # Users putting raw PII into metadata were always violating the contract.
@@ -61,6 +61,174 @@ _ENTITY_DETAIL_ALLOWED_KEYS = frozenset({
 _METADATA_ALLOWED_SCALAR_TYPES = (str, int, float, bool, type(None))
 _METADATA_MAX_VALUE_LEN = 256
 _METADATA_MAX_DEPTH = 3
+
+# v0.7.0 A4a-3: bias_context schema for Article 4a bias-detection events
+# (`bias_session_start` / `bias_pseudonymise` / `bias_finding` / `bias_session_end`).
+#
+# `bias_context` is a NEW optional top-level field on AuditEntry (added v0.7.0)
+# used by `BiasDetectionSession`. It exists because the regular `metadata`
+# field's 256-char per-string cap is too tight for the Article 4a
+# `necessity_justification` requirement (<= 2000 chars -- operators justify
+# why bias detection cannot be done with synthetic / anonymised data).
+#
+# Shape: strict per-key allow-list with per-key max lengths. Designed so the
+# B3 invariant ("no original PII in logs") still holds -- operators are
+# expected to write justification text describing their methodology, NOT to
+# stuff source records into the field. The G5 MCP PII scan is applied to
+# `purpose` and `necessity_justification` before the value ever reaches
+# the audit logger.
+_BIAS_CONTEXT_ALLOWED_KEYS = frozenset({
+    "session_id",                # str (UUID4 typical)
+    "purpose",                   # str (<= 500)
+    "necessity_justification",   # str (<= 2000)  -- wider than metadata cap
+    "categories_allowed",        # list[str] (<= 32 entries, each <= 32 chars)
+    "max_lifetime_seconds",      # int (1 .. 604800 = 7 days)
+    "categories_used",           # dict[str, int]  -- per-pseudonymise event
+    "entity_count",              # int             -- per-pseudonymise event
+    "exit_reason",               # str (<= 32)     -- "clean" | "timeout" | "error"
+    "wipe_confirmed",            # bool
+    "entries_processed",         # int
+    "duration_seconds",          # float
+    "finding_summary",           # str (<= 500)    -- per bias_finding
+    "bias_metrics",              # dict (numeric only, B3-style validation)
+})
+
+_BIAS_CONTEXT_STR_MAX_LEN = {
+    "session_id": 64,
+    "purpose": 500,
+    "necessity_justification": 2000,
+    "exit_reason": 32,
+    "finding_summary": 500,
+}
+
+_BIAS_CONTEXT_NUMERIC_FIELDS = frozenset({
+    "max_lifetime_seconds", "entity_count", "entries_processed", "duration_seconds",
+})
+
+_BIAS_VALID_EVENT_TYPES = frozenset({
+    "bias_session_start", "bias_pseudonymise", "bias_finding", "bias_session_end",
+})
+
+
+def _validate_bias_context(ctx: dict) -> None:
+    """v0.7.0 A4a-3: validate the `bias_context` field shape.
+
+    Article 4a entries carry session metadata that needs longer string limits
+    than the regular `metadata` field allows (necessity_justification is up
+    to 2000 chars by design). This validator enforces a strict per-key
+    allow-list so the looser limits cannot be abused as a generic PII sink.
+
+    Raises RuntimeError on any violation.
+    """
+    if not isinstance(ctx, dict):
+        raise RuntimeError(
+            f"AUDIT SCHEMA VIOLATION: bias_context must be a dict "
+            f"(got {type(ctx).__name__})."
+        )
+    for k, v in ctx.items():
+        if not isinstance(k, str):
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: bias_context key {k!r} must be a string."
+            )
+        if k not in _BIAS_CONTEXT_ALLOWED_KEYS:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: bias_context contains disallowed "
+                f"key {k!r}. Allowed: {sorted(_BIAS_CONTEXT_ALLOWED_KEYS)}."
+            )
+        # PII-forbidden keys defence-in-depth (same as entity_details).
+        if k in _PII_FORBIDDEN_KEYS:
+            raise RuntimeError(
+                f"COMPLIANCE VIOLATION: bias_context contains forbidden "
+                f"field {k!r}. Audit logs must not contain original PII."
+            )
+        # Per-key shape checks.
+        if k in _BIAS_CONTEXT_STR_MAX_LEN:
+            if not isinstance(v, str):
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: bias_context.{k} must be a "
+                    f"string (got {type(v).__name__})."
+                )
+            limit = _BIAS_CONTEXT_STR_MAX_LEN[k]
+            if len(v) > limit:
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: bias_context.{k} exceeds "
+                    f"{limit} chars (got {len(v)})."
+                )
+        elif k == "categories_allowed":
+            if not isinstance(v, list):
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: bias_context.categories_allowed "
+                    f"must be a list (got {type(v).__name__})."
+                )
+            if len(v) > 32:
+                raise RuntimeError(
+                    "AUDIT SCHEMA VIOLATION: bias_context.categories_allowed "
+                    "exceeds 32 entries."
+                )
+            for i, item in enumerate(v):
+                if not isinstance(item, str) or len(item) > 32:
+                    raise RuntimeError(
+                        f"AUDIT SCHEMA VIOLATION: bias_context.categories_allowed[{i}] "
+                        f"must be a string <= 32 chars."
+                    )
+        elif k == "categories_used":
+            if not isinstance(v, dict):
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: bias_context.categories_used "
+                    f"must be a dict (got {type(v).__name__})."
+                )
+            if len(v) > 64:
+                raise RuntimeError(
+                    "AUDIT SCHEMA VIOLATION: bias_context.categories_used "
+                    "exceeds 64 entries."
+                )
+            for ck, cv in v.items():
+                if not isinstance(ck, str) or len(ck) > 32:
+                    raise RuntimeError(
+                        f"AUDIT SCHEMA VIOLATION: bias_context.categories_used "
+                        f"key {ck!r} must be a string <= 32 chars."
+                    )
+                if not isinstance(cv, int) or isinstance(cv, bool):
+                    raise RuntimeError(
+                        f"AUDIT SCHEMA VIOLATION: bias_context.categories_used[{ck}] "
+                        f"must be an int (got {type(cv).__name__})."
+                    )
+        elif k in _BIAS_CONTEXT_NUMERIC_FIELDS:
+            if not isinstance(v, (int, float)) or isinstance(v, bool):
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: bias_context.{k} must be numeric "
+                    f"(got {type(v).__name__})."
+                )
+        elif k == "wipe_confirmed":
+            if not isinstance(v, bool):
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: bias_context.wipe_confirmed must "
+                    f"be a bool (got {type(v).__name__})."
+                )
+        elif k == "bias_metrics":
+            # Reuse the regular metadata validator: strict scalar types,
+            # depth 3, value length 256. This is the "B3 constraints apply
+            # to bias_metrics" design decision from PLAN_v070.md.
+            if not isinstance(v, dict):
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: bias_context.bias_metrics must "
+                    f"be a dict (got {type(v).__name__})."
+                )
+            # v0.7.0 SECURITY-13: per-entry key-count cap (log-volume DoS
+            # defense). 64 matches the categories_used cap. Bias-detection
+            # findings should be a handful of numeric metrics, not a tree.
+            if len(v) > 64:
+                raise RuntimeError(
+                    "AUDIT SCHEMA VIOLATION: bias_context.bias_metrics "
+                    "exceeds 64 keys."
+                )
+            for bk, bv in v.items():
+                if not isinstance(bk, str):
+                    raise RuntimeError(
+                        f"AUDIT SCHEMA VIOLATION: bias_metrics key {bk!r} "
+                        f"must be a string."
+                    )
+                _validate_metadata_value(bv, depth=2, path=f".bias_metrics.{bk}")
 
 
 def _validate_metadata_value(value, depth=0, path=""):
@@ -161,6 +329,21 @@ def _validate_audit_entry_schema(entry_data: dict) -> None:
                 )
             _validate_metadata_value(v, depth=1, path=f".{k}")
 
+    # v0.7.0 A4a-3: bias_context (Article 4a bias-detection events)
+    bias_context = entry_data.get("bias_context")
+    if bias_context is not None:
+        _validate_bias_context(bias_context)
+        # Event_type / bias_context coupling: if bias_context is present, the
+        # event_type MUST be one of the four bias_* types -- otherwise an
+        # arbitrary `sanitize` entry could carry bias-detection metadata,
+        # confusing auditors and obscuring the actual Article 4a workflow.
+        ev = entry_data.get("event_type")
+        if ev not in _BIAS_VALID_EVENT_TYPES:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: bias_context requires event_type in "
+                f"{sorted(_BIAS_VALID_EVENT_TYPES)} (got {ev!r})."
+            )
+
 
 def _assert_no_pii_in_entry(entry_data: dict) -> None:
     """
@@ -194,14 +377,16 @@ class AuditEntry:
     entry_hash: str             # Hash of this entry (computed from all fields + prev_hash)
     metadata: dict[str, Any]    # Additional context (user_id, session_id, etc.)
     risk_assessment: Optional[dict]  # Context-based PII leakage risk (when context_analysis enabled)
-    # --- Compliance Mode (v0.6.0) — only populated when config.compliance_mode is set ---
+    # --- Compliance Mode (v0.6.0) -- only populated when config.compliance_mode is set ---
     compliance_version: Optional[str] = None      # e.g. "eu_ai_act_article12_v1"
     article_ref: Optional[list[str]] = None       # Articles satisfied, e.g. ["EU_AI_Act_Art_12", ...]
     retention_hint_days: Optional[int] = None     # Recommended log retention period
     pii_in_log: Optional[bool] = None             # Always False in compliance mode (asserted)
+    # --- Article 4a Bias Detection (v0.7.0) -- only populated for bias_* events ---
+    bias_context: Optional[dict[str, Any]] = None  # Session metadata for Article 4a workflows
 
 
-# v0.6.4 BUG-3: single source of truth — derive the allow-list from the
+# v0.6.4 BUG-3: single source of truth -- derive the allow-list from the
 # dataclass fields. Adding/removing a field on AuditEntry now automatically
 # updates the validator's allow-list, eliminating the drift hazard from the
 # v0.6.x parallel maintenance pattern.
@@ -243,7 +428,7 @@ class AuditLogger:
         most-recent file has no valid entries at all, walk to the older file.
 
         Replaces the old behaviour of reading only the trailing line and
-        falling through to the previous file when that line was corrupt —
+        falling through to the previous file when that line was corrupt --
         that silently rolled the chain back over any valid entries written
         between the previous file and the corruption point, leaving them
         stranded relative to the next entry.
@@ -253,7 +438,14 @@ class AuditLogger:
         """
         for log_file in reversed(log_files):
             try:
-                with open(log_file, "r") as f:
+                # v0.7.0: explicit utf-8. Default open() uses the platform
+                # encoding (cp1252 on Windows), which mojibakes any non-ASCII
+                # bytes -- and JS-written audit chains preserve UTF-8 in
+                # canonical JSON. Without this, cross-SDK verify_chain
+                # spuriously reports tampering on entries containing non-ASCII
+                # (em-dashes, accented characters, CJK, etc.). Same bug on
+                # any Python audit-file read site below.
+                with open(log_file, "r", encoding="utf-8") as f:
                     lines = [ln.strip() for ln in f if ln.strip()]
             except OSError:
                 continue
@@ -261,19 +453,19 @@ class AuditLogger:
                 try:
                     entry = json.loads(line)
                 except json.JSONDecodeError:
-                    continue  # corrupt line — keep scanning backward in this file
+                    continue  # corrupt line -- keep scanning backward in this file
                 if "seq" in entry and "entry_hash" in entry:
                     return entry
-            # this file had no valid entries at all — try the next-older one
+            # this file had no valid entries at all -- try the next-older one
         return None
 
     def _ensure_init(self):
         """Initialize log directory and recover chain state from existing logs.
 
         v0.6.3 H4 changes:
-          * Double-checked locking — concurrent first callers can't both
+          * Double-checked locking -- concurrent first callers can't both
             run init and overwrite each other's state mid-flight.
-          * Backward scan via `_scan_for_last_valid_entry` — partial-write
+          * Backward scan via `_scan_for_last_valid_entry` -- partial-write
             corruption at the tail of the log no longer strands earlier
             valid entries from the chain.
           * Strict mode (config.audit_strict_chain): if log files exist
@@ -290,7 +482,7 @@ class AuditLogger:
             # users cannot list audit log filenames. Default Linux umask
             # would otherwise leave the dir 0o755 (world-readable directory
             # entries reveal which days have audit activity). On Windows the
-            # mode arg is largely ignored — operators must rely on NTFS ACLs.
+            # mode arg is largely ignored -- operators must rely on NTFS ACLs.
             self._log_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             # If the directory already existed with looser permissions, tighten
             # it. POSIX-only; Windows chmod is a no-op for these bits.
@@ -330,7 +522,7 @@ class AuditLogger:
                     f"{self._log_dir!s} contains {len(log_files)} file(s) but "
                     f"none have a recoverable trailing entry. Refusing to "
                     f"silently restart from GENESIS (audit_strict_chain=True). "
-                    f"Inspect the files for corruption — a silent restart "
+                    f"Inspect the files for corruption -- a silent restart "
                     f"would let an attacker mask tampering as a normal restart."
                 )
             # else: log_files empty (truly first run) OR all files empty AND
@@ -348,10 +540,10 @@ class AuditLogger:
         v0.6.3 G7: opens with `os.open(..., O_WRONLY|O_CREAT|O_APPEND, 0o600)`
         on POSIX so other system users cannot read audit log contents (entity
         hashes, token counts, categories, timing). Default umask would leave
-        the file 0o644 — readable by every user on the host. On Windows the
+        the file 0o644 -- readable by every user on the host. On Windows the
         mode arg is largely a no-op; operators must rely on NTFS ACLs.
         Existing files keep their current mode (we don't tighten on every
-        write — only the audit dir is chmod'd defensively at init).
+        write -- only the audit dir is chmod'd defensively at init).
         """
         import sys
         import os as _os
@@ -413,6 +605,7 @@ class AuditLogger:
         certificate_hash: Optional[str] = None,
         key_id: Optional[str] = None,
         risk_assessment: Optional[dict] = None,
+        bias_context: Optional[dict[str, Any]] = None,
     ) -> Optional[AuditEntry]:
         """
         Append a new entry to the audit log.
@@ -425,7 +618,7 @@ class AuditLogger:
         with self._lock:
             self._ensure_init()
 
-            # Build entry data (without entry_hash — we compute that last)
+            # Build entry data (without entry_hash -- we compute that last)
             entry_data = {
                 "seq": self._seq,
                 "event_id": str(uuid.uuid4()),
@@ -447,12 +640,20 @@ class AuditLogger:
                 "prev_hash": self._prev_hash,
                 "metadata": metadata or {},
                 "risk_assessment": risk_assessment,
+                # v0.7.0 A4a-3: bias_context -- only present on bias_* events.
+                "bias_context": bias_context,
             }
 
-            # Compliance mode injection (v0.6.0) — fields are part of the hash chain.
+            # Compliance mode injection (v0.6.0) -- fields are part of the hash chain.
             if self.config.compliance_mode == "eu_ai_act_article12":
                 entry_data["compliance_version"] = "eu_ai_act_article12_v1"
-                entry_data["article_ref"] = ["EU_AI_Act_Art_12", "EU_AI_Act_Art_19"]
+                article_refs = ["EU_AI_Act_Art_12", "EU_AI_Act_Art_19"]
+                # v0.7.0 A4a-3: bias-detection events ADDITIONALLY satisfy
+                # Article 4a; reflect that in article_ref so downstream
+                # compliance reports can group them.
+                if event_type in _BIAS_VALID_EVENT_TYPES:
+                    article_refs.append("EU_AI_Act_Art_4a")
+                entry_data["article_ref"] = article_refs
                 entry_data["retention_hint_days"] = self.config.retention_hint_days
                 entry_data["pii_in_log"] = False
 
@@ -469,7 +670,7 @@ class AuditLogger:
             payload = json.dumps(entry_data, separators=(",", ":")) + "\n"
             # v0.6.3 H4: prepend `\n` if recovery detected the target file
             # ends mid-line (partial-write tail from a prior crash). The flag
-            # is one-shot — clear after first use.
+            # is one-shot -- clear after first use.
             if self._needs_leading_newline:
                 payload = "\n" + payload
                 self._needs_leading_newline = False
@@ -494,7 +695,7 @@ class AuditLogger:
         Args:
             log_file: Specific log file to verify. If None, all files in log_dir.
             output_format: When None (default), returns the existing
-                (is_valid, errors, final_seq) tuple — backward compatible.
+                (is_valid, errors, final_seq) tuple -- backward compatible.
                 When "compliance_report", returns a structured dict with
                 period, totals, category aggregates, and verdict.
             legacy_canonical: When True, recompute hashes using the v0.6.0
@@ -552,7 +753,8 @@ class AuditLogger:
         prev_hash = GENESIS_HASH
 
         for fpath in files:
-            with open(fpath, "r") as f:
+            # v0.7.0: explicit utf-8 -- see _scan_for_last_valid_entry note.
+            with open(fpath, "r", encoding="utf-8") as f:
                 for line_num, line in enumerate(f, 1):
                     line = line.strip()
                     if not line:
@@ -561,7 +763,7 @@ class AuditLogger:
                     try:
                         entry = json.loads(line)
                     except json.JSONDecodeError:
-                        errors.append(f"{fpath.name}:{line_num} — Invalid JSON")
+                        errors.append(f"{fpath.name}:{line_num} -- Invalid JSON")
                         continue
 
                     # Track the last seq number seen
@@ -572,7 +774,7 @@ class AuditLogger:
                     # Check chain link
                     if entry.get("prev_hash") != prev_hash:
                         errors.append(
-                            f"{fpath.name}:{line_num} seq={entry.get('seq')} — "
+                            f"{fpath.name}:{line_num} seq={entry.get('seq')} -- "
                             f"Chain broken: expected prev_hash={prev_hash[:16]}..., "
                             f"got {entry.get('prev_hash', 'MISSING')[:16]}..."
                         )
@@ -592,7 +794,7 @@ class AuditLogger:
                             if entry.get("pii_in_log") is True:
                                 pii_in_logs = True
                                 errors.append(
-                                    f"{fpath.name}:{line_num} seq={entry.get('seq')} — "
+                                    f"{fpath.name}:{line_num} seq={entry.get('seq')} -- "
                                     f"COMPLIANCE VIOLATION: pii_in_log=true"
                                 )
                         else:
@@ -608,7 +810,7 @@ class AuditLogger:
                     stored_hash = entry.pop("entry_hash", "")
                     recomputed = self._compute_hash(entry, legacy_canonical=legacy_canonical)
                     # v0.6.4 G8: timing-safe comparison. The byte-by-byte != on
-                    # hex strings short-circuits at the first mismatching byte —
+                    # hex strings short-circuits at the first mismatching byte --
                     # an attacker with many verify_chain calls and microsecond
                     # timing could in principle infer hash bytes. hmac.compare_digest
                     # is constant-time for equal-length inputs. Defense-in-depth
@@ -616,7 +818,7 @@ class AuditLogger:
                     # via a public API endpoint.
                     if not hmac.compare_digest(stored_hash, recomputed):
                         errors.append(
-                            f"{fpath.name}:{line_num} seq={entry.get('seq')} — "
+                            f"{fpath.name}:{line_num} seq={entry.get('seq')} -- "
                             f"Entry tampered: stored_hash={stored_hash[:16]}..., "
                             f"recomputed={recomputed[:16]}..."
                         )
@@ -686,7 +888,8 @@ class AuditLogger:
 
         for fpath in sorted(self._log_dir.glob("audit_*.jsonl")):
             stats["log_files"].append(str(fpath.name))
-            with open(fpath, "r") as f:
+            # v0.7.0: explicit utf-8 -- see _scan_for_last_valid_entry note.
+            with open(fpath, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
