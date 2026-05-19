@@ -15,6 +15,8 @@ from cloakllm.token_spec import (
     NER_CATEGORIES,
     REGEX_CATEGORIES,
     RESERVED_CATEGORIES,
+    # v0.7.0 A4a-2 — GDPR Art. 9 / EU AI Act Art. 4a special-category PII
+    SPECIAL_CATEGORY_CATEGORIES,
     is_redacted_token,
     parse_token,
     validate_category_name,
@@ -161,8 +163,10 @@ class TestCategoryRegistry:
     """Tests for built-in category sets."""
 
     def test_builtin_is_union(self):
+        # v0.7.0: union now includes SPECIAL_CATEGORY_CATEGORIES (Art. 4a).
         assert BUILTIN_CATEGORIES == (
-            REGEX_CATEGORIES | NER_CATEGORIES | LLM_CATEGORIES | LOCALE_CATEGORIES
+            REGEX_CATEGORIES | NER_CATEGORIES | LLM_CATEGORIES
+            | SPECIAL_CATEGORY_CATEGORIES | LOCALE_CATEGORIES
         )
 
     def test_reserved_equals_builtin(self):

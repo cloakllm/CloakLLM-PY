@@ -801,10 +801,13 @@ class Shield:
                 },
                 {
                     "article": "EU_AI_Act_Art_4a",
-                    "status": "partial",
+                    "status": "satisfied",
                     "notes": (
-                        "Tokenization qualifies as pseudonymisation; "
-                        "BiasDetectionSession not yet implemented (v0.7)"
+                        "BiasDetectionSession (v0.7.0+) implements all six "
+                        "Article 4a safeguards: necessity_justification, "
+                        "pseudonymisation, in-memory-only token map, "
+                        "categories_allowed scope cap, max_lifetime + auto-wipe, "
+                        "and audit-chain recording."
                     ),
                 },
             ],

@@ -33,7 +33,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cloakllm import Shield, ShieldConfig
+from cloakllm import BiasDetectionSession, Shield, ShieldConfig
 from cloakllm.attestation import DeploymentKeyPair, SanitizationCertificate
 
 
@@ -111,6 +111,58 @@ def _write_audit_chain_fixture(out_path: Path) -> dict:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _write_bias_audit_chain_fixture(out_path: Path) -> dict:
+    """v0.7.0 A4a-7: chain containing all 4 bias_* event types.
+
+    Ensures the new event types canonicalize identically across Python and
+    JS — same machinery as the regular audit chain, but with the
+    `bias_context` payload and `EU_AI_Act_Art_4a` article_ref injection.
+    """
+    tmp = Path(tempfile.mkdtemp(prefix="cloakllm_i7_bias_chain_"))
+    try:
+        shield = Shield(ShieldConfig(
+            log_dir=tmp,
+            audit_enabled=True,
+            compliance_mode="eu_ai_act_article12",
+        ))
+        with BiasDetectionSession(
+            shield=shield,
+            purpose="Cross-SDK I7 bias-detection fixture chain.",
+            necessity_justification=(
+                "Fixture for cross-SDK canonical-JSON equivalence regression "
+                "test. No real bias detection is being performed."
+            ),
+            categories_allowed={"RACE", "RELIGION"},
+            max_lifetime_seconds=60,
+        ) as session:
+            session.pseudonymise(
+                "Asian Buddhist patient",
+                force_categories=[(0, 5, "RACE"), (6, 14, "RELIGION")],
+            )
+            session.record_finding(
+                finding_summary="Cross-SDK fixture: no real bias finding.",
+                bias_metrics={"fixture": True, "n": 1},
+            )
+        chain_files = sorted(tmp.glob("audit_*.jsonl"))
+        assert chain_files, "no bias audit file produced"
+        content = chain_files[-1].read_text(encoding="utf-8")
+        out_path.write_text(content, encoding="utf-8")
+        ok, errors, final_seq = shield.audit.verify_chain()
+        return {
+            "format": "jsonl",
+            "writer_sdk": "python",
+            "writer_version": "0.7.0",
+            "chain_valid": ok,
+            "chain_errors": errors,
+            "final_seq": final_seq,
+            "entries": len([l for l in content.splitlines() if l.strip()]),
+            "event_types": ["bias_session_start", "bias_pseudonymise",
+                            "bias_finding", "bias_session_end"],
+        }
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def _write_certificate_fixture(out_path: Path) -> dict:
     """Generate a signed sanitization certificate."""
     keypair = _build_pinned_keypair()
@@ -148,13 +200,16 @@ def main() -> None:
     JS_FIXTURES.mkdir(parents=True, exist_ok=True)
 
     chain_path_py = PY_FIXTURES / "audit_chain_py.jsonl"
+    bias_chain_path_py = PY_FIXTURES / "audit_chain_bias_py.jsonl"
     cert_path_py = PY_FIXTURES / "certificate_py.json"
 
     chain_meta = _write_audit_chain_fixture(chain_path_py)
+    bias_chain_meta = _write_bias_audit_chain_fixture(bias_chain_path_py)
     cert_meta = _write_certificate_fixture(cert_path_py)
 
     # Mirror to JS fixtures dir.
     shutil.copyfile(chain_path_py, JS_FIXTURES / "audit_chain_py.jsonl")
+    shutil.copyfile(bias_chain_path_py, JS_FIXTURES / "audit_chain_bias_py.jsonl")
     shutil.copyfile(cert_path_py, JS_FIXTURES / "certificate_py.json")
 
     # Update / merge metadata (the JS generator writes the JS-side keys).
@@ -167,6 +222,7 @@ def main() -> None:
         except json.JSONDecodeError:
             pass
     existing["python_chain"] = chain_meta
+    existing["python_bias_chain"] = bias_chain_meta
     existing["python_certificate"] = cert_meta
     existing["regenerated_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     payload = json.dumps(existing, indent=2, sort_keys=True) + "\n"
@@ -174,8 +230,9 @@ def main() -> None:
     meta_path_js.write_text(payload, encoding="utf-8")
 
     print(f"wrote {chain_path_py.name} ({chain_meta['entries']} entries, valid={chain_meta['chain_valid']})")
+    print(f"wrote {bias_chain_path_py.name} ({bias_chain_meta['entries']} entries, valid={bias_chain_meta['chain_valid']})")
     print(f"wrote {cert_path_py.name} (self_verify_ok={cert_meta['self_verify_ok']})")
-    print(f"mirrored both into {JS_FIXTURES.name}/")
+    print(f"mirrored all three into {JS_FIXTURES.name}/")
     print(f"updated cross_sdk_metadata.json in both repos")
 
 

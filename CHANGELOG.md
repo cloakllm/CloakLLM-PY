@@ -5,6 +5,39 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-05-19
+
+**Headline: EU AI Act Article 4a Bias Detection Workflow.**
+
+Article 4a (added to the EU AI Act by the May 7 2026 Digital Omnibus) permits processing GDPR Article 9 special-category data — race, ethnic origin, religion, political opinion, health, biometric, sexual orientation, trade union membership, genetic data — strictly for bias detection / correction in AI systems, subject to six safeguards. v0.7.0 ships `BiasDetectionSession`, a context-managed workflow that operationalises all six safeguards.
+
+### Added
+
+- **`cloakllm.BiasDetectionSession`** — sibling class over a `Shield` (composition, not inheritance). Required arguments: `purpose`, `necessity_justification` (≤ 2000 chars, Article 4a safeguard #1), `categories_allowed` (subset of `SPECIAL_CATEGORY_CATEGORIES`, safeguard #4), `max_lifetime_seconds` (no default; 1 .. 604800 = 7-day ceiling, safeguard #5). Use as a context manager (`with BiasDetectionSession(...) as s:`) or via `s.start()` + `s.end()` in a try/finally.
+- **8 new special-category PII categories** added to `BUILTIN_CATEGORIES` and exposed as `SPECIAL_CATEGORY_CATEGORIES`: `RACE`, `ETHNICITY`, `RELIGION`, `POLITICAL_OPINION`, `HEALTH_BIOMETRIC`, `SEXUAL_ORIENTATION`, `TRADE_UNION`, `GENETIC`. Deliberately NOT auto-detected by regex — introduced only via `BiasDetectionSession.pseudonymise(text, force_categories=[(start, end, category), ...])` or opt-in LLM detector.
+- **4 new audit event types**: `bias_session_start`, `bias_pseudonymise`, `bias_finding`, `bias_session_end`. All carry a strict-validated `bias_context` field (session_id, purpose, necessity_justification, categories_allowed, max_lifetime_seconds, finding_summary, bias_metrics, exit_reason, wipe_confirmed, entries_processed, duration_seconds). When the Shield is in `compliance_mode="eu_ai_act_article12"`, bias events additionally get `EU_AI_Act_Art_4a` appended to `article_ref` — the same chain satisfies both articles.
+- **Typed exceptions**: `BiasDetectionError` (base), `BiasDetectionScopeError`, `BiasDetectionTimeoutError`, `BiasDetectionStateError`. All inherit from `RuntimeError` for back-compat.
+- **`AuditEntry.bias_context`** — new optional dataclass field; B3 schema validator extended with `_validate_bias_context` (strict per-key allow-list with per-key length caps; PII-forbidden-key list still applies).
+- **Cross-SDK fixture** `audit_chain_bias_py.jsonl` (mirrored to JS) + I7 verification test that Python and JS canonicalize bias-event hash chains identically.
+
+### Changed
+
+- `compliance_summary()` reports Article 4a status as `"satisfied"` (was `"partial"`) with notes referencing `BiasDetectionSession`.
+- `AuditLogger` log/verify open audit-log files with explicit `encoding="utf-8"` instead of the platform default. On Windows the platform default is cp1252, which mojibakes any UTF-8 non-ASCII bytes (em-dashes, accented characters, CJK) when reading a chain written by the JS SDK — causing spurious "Entry tampered" verdicts. The on-disk format for Python-written chains is unchanged (`json.dumps` still defaults to `ensure_ascii=True`), so existing chains remain verifiable.
+
+### Notes for Article 4a workflows
+
+- Audit chain canonical-JSON invariant: producers writing audit entries from Python MUST pass integer `0` (not float `0.0`) for any numeric field that may legitimately be zero. Python's `json.dumps(0.0)` emits `"0.0"` while JS's `JSON.stringify(0.0)` emits `"0"`. The `BiasDetectionSession` zero-latency event sites already follow this rule; if you add a new audit-log call site, coerce integer-valued floats to int at the producer.
+- Post-deletion forensics is **by design limited** — Article 4a safeguard #5 requires deletion after bias is corrected. The audit chain retains entry counts, categories, timing, and finding summaries but no way to reconstruct source → token mappings.
+
+### MCP
+
+Three new MCP tools shipped via `cloakllm-mcp`: `bias_detection_session_start`, `bias_pseudonymise`, `bias_detection_session_end`. PII scan applied to `purpose` / `necessity_justification` / `finding_summary` (G5-equivalent), BUG-4 uniform dict returns, G13 log hygiene, OrderedDict LRU for in-memory session store.
+
+### Test suite growth
+
+cloakllm-py: 423 → 639 tests. cloakllm-js: 488 → 536. cloakllm-mcp: 99 → 121.
+
 ## [0.6.5] - 2026-04-24
 
 Drop-in safe from v0.6.4. Carries the post-v0.6.4 `python-dotenv` CVE
