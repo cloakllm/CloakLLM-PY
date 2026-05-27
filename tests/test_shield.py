@@ -332,18 +332,23 @@ class TestEndToEnd:
         assert "EMAIL" in categories
         assert "SSN" in categories
 
-    # --- F4 (v0.6.1): analyze() default redact_values deprecation ---
+    # --- v0.7.1 C7.1-5: analyze() default redact_values flipped to True ---
+    # (replaces v0.6.1 F4 deprecation warning tests; default is now redact-by-default)
 
-    def test_analyze_warns_when_redact_values_omitted(self, shield):
-        """v0.6.1 F4: implicit default fires DeprecationWarning."""
+    def test_analyze_default_is_now_redact_true(self, shield):
+        """v0.7.1 C7.1-5: omitting redact_values yields redacted output (no warning)."""
         import warnings
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            shield.analyze("john@acme.com")
+            result = shield.analyze("john@acme.com")
+        # No deprecation warnings now -- the default is True, not _UNSET
         deprecations = [x for x in w if issubclass(x.category, DeprecationWarning)]
-        assert len(deprecations) == 1
-        assert "v0.7.0" in str(deprecations[0].message)
-        assert "redact_values" in str(deprecations[0].message)
+        assert len(deprecations) == 0, (
+            f"unexpected DeprecationWarning(s): {[str(x.message) for x in deprecations]}"
+        )
+        # And the per-entity text MUST be redacted (the whole point of the flip).
+        if result["entity_count"]:
+            assert result["entities"][0]["text"] == "[redacted]"
 
     def test_analyze_silent_when_redact_values_explicit_true(self, shield):
         import warnings

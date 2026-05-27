@@ -70,6 +70,12 @@ jobs:
           python -m venv /tmp/wheel-test-venv
           /tmp/wheel-test-venv/bin/pip install --quiet --upgrade pip
           /tmp/wheel-test-venv/bin/pip install --quiet dist/cloakllm-*.whl
+          # v0.7.1: spaCy 3.8.14 on Python 3.12 doesn't always pull `click`
+          # transitively via `typer` in fresh venvs, breaking `python -m spacy
+          # download`. Install click explicitly as a workaround; this is a
+          # spaCy-CLI dep regression, not a cloakllm dep. Tracking upstream
+          # at https://github.com/explosion/spaCy/issues; remove when fixed.
+          /tmp/wheel-test-venv/bin/pip install --quiet click
           /tmp/wheel-test-venv/bin/python -m spacy download en_core_web_sm
           /tmp/wheel-test-venv/bin/python -c "
           import cloakllm

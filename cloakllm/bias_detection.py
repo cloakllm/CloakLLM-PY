@@ -120,7 +120,17 @@ _FORCE_CATEGORIES_MAX = 1024
 #   U+2067 RLI  Right-to-Left Isolate
 #   U+2068 FSI  First Strong Isolate
 #   U+2069 PDI  Pop Directional Isolate
-_BIDI_FORMATTING_CHARS = "‪‫‬‭‮⁦⁧⁨⁩"
+#
+# AUDIT71-7 (bandit B613): the constants below use \uXXXX escape sequences
+# rather than literal bidi formatting characters so static scanners (bandit,
+# semgrep) don't trip the "trojan source" detector. Runtime semantics are
+# identical; the regex matches the same codepoint range either way. This is
+# the defense AGAINST bidi-spoofing, not an attack vector -- we contain the
+# bidi chars in a CONSTANT specifically to REJECT them in user input.
+_BIDI_FORMATTING_CHARS = (
+    "\u202a\u202b\u202c\u202d\u202e"   # LRE, RLE, PDF, LRO, RLO
+    "\u2066\u2067\u2068\u2069"         # LRI, RLI, FSI, PDI
+)
 _BIDI_FORMATTING_RE = re.compile(f"[{_BIDI_FORMATTING_CHARS}]")
 
 

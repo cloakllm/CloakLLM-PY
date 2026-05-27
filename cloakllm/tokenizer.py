@@ -94,6 +94,11 @@ class TokenMap:
     merkle_tree: Optional[Any] = None
     # Context risk assessment (set by Shield when context_analysis is enabled)
     risk_assessment: Optional[dict] = None
+    # v0.7.1 C7.1-1: decision_id -- per-inference audit anchor. Set by Shield
+    # on sanitize (auto-generated ULID or caller-supplied); read by Shield on
+    # the matching desanitize so both audit entries share the same anchor.
+    # Cleared when None to support multi-decision token-map reuse.
+    decision_id: Optional[str] = None
 
     def __post_init__(self):
         self._lock = threading.Lock()

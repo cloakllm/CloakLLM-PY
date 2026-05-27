@@ -329,6 +329,35 @@ def _validate_audit_entry_schema(entry_data: dict) -> None:
                 )
             _validate_metadata_value(v, depth=1, path=f".{k}")
 
+    # v0.7.1 C7.1-1: decision_id (cross-entry audit anchor for one inference).
+    # Optional ULID/UUID/opaque-string. Loose validation here -- the field is
+    # allowed to be either the auto-generated ULID or a caller-supplied
+    # identifier from an upstream decision-tracking system. Strict per-char
+    # check rejects control characters and bidi-formatting (the SECURITY-13
+    # spoofing class).
+    decision_id = entry_data.get("decision_id")
+    if decision_id is not None:
+        from cloakllm._ulid import is_valid_decision_id
+        if not is_valid_decision_id(decision_id):
+            raise RuntimeError(
+                "AUDIT SCHEMA VIOLATION: decision_id must be a non-empty "
+                "ASCII-printable string, 1..64 chars, no control bytes."
+            )
+
+    # v0.7.1 C7.1-2: system_version_pin (composed deployment+instruction+model
+    # version). Optional; when present must be a string <= 256 chars.
+    system_version_pin = entry_data.get("system_version_pin")
+    if system_version_pin is not None:
+        if not isinstance(system_version_pin, str):
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: system_version_pin must be a "
+                f"string (got {type(system_version_pin).__name__})."
+            )
+        if len(system_version_pin) > 256:
+            raise RuntimeError(
+                "AUDIT SCHEMA VIOLATION: system_version_pin exceeds 256 chars."
+            )
+
     # v0.7.0 A4a-3: bias_context (Article 4a bias-detection events)
     bias_context = entry_data.get("bias_context")
     if bias_context is not None:
@@ -384,6 +413,13 @@ class AuditEntry:
     pii_in_log: Optional[bool] = None             # Always False in compliance mode (asserted)
     # --- Article 4a Bias Detection (v0.7.0) -- only populated for bias_* events ---
     bias_context: Optional[dict[str, Any]] = None  # Session metadata for Article 4a workflows
+    # --- v0.7.1 C7.1-1 / C7.1-2 -- Compliance-schema extensions ---
+    decision_id: Optional[str] = None       # Per-inference audit anchor (ULID by default).
+                                            # All audit entries written for a single
+                                            # user-facing AI decision share the same ID.
+    system_version_pin: Optional[str] = None  # Composed model@deployment/instruction
+                                              # version pin. Optional; deployer supplies
+                                              # deployment/instruction via ShieldConfig.
 
 
 # v0.6.4 BUG-3: single source of truth -- derive the allow-list from the
@@ -606,6 +642,8 @@ class AuditLogger:
         key_id: Optional[str] = None,
         risk_assessment: Optional[dict] = None,
         bias_context: Optional[dict[str, Any]] = None,
+        decision_id: Optional[str] = None,
+        system_version_pin: Optional[str] = None,
     ) -> Optional[AuditEntry]:
         """
         Append a new entry to the audit log.
@@ -642,6 +680,9 @@ class AuditLogger:
                 "risk_assessment": risk_assessment,
                 # v0.7.0 A4a-3: bias_context -- only present on bias_* events.
                 "bias_context": bias_context,
+                # v0.7.1 C7.1-1 / C7.1-2: compliance-schema extensions
+                "decision_id": decision_id,
+                "system_version_pin": system_version_pin,
             }
 
             # Compliance mode injection (v0.6.0) -- fields are part of the hash chain.
@@ -701,16 +742,25 @@ class AuditLogger:
             legacy_canonical: When True, recompute hashes using the v0.6.0
                 canonicalizer (`ensure_ascii=True`). Use this to verify audit
                 chains written by CloakLLM v0.5.x or v0.6.0 that contain
-                non-ASCII characters. Sunset in v0.7.0.
+                non-ASCII characters. SCHEDULED FOR REMOVAL IN v0.9.0
+                (extended from v0.7.0 / v0.8.0 to give operators with
+                archival v0.5.x/v0.6.0 chains time to migrate).
 
         Returns (is_valid, errors, final_seq) by default, or a dict
         when output_format="compliance_report".
         """
         if legacy_canonical:
+            # v0.7.1 C7.1-4 (phase 1): emit DeprecationWarning on EVERY call,
+            # not just on first import. Phase 2 (v0.9.0) removes the flag
+            # entirely. The warning is intentionally noisy at v0.7.1+ so any
+            # operator still using legacy_canonical sees the message in CI /
+            # production logs and has time to migrate.
             import warnings as _w
             _w.warn(
                 "legacy_canonical=True is a backward-compat shim for v0.5.x / "
-                "v0.6.0 audit chains and will be removed in v0.7.0.",
+                "v0.6.0 audit chains. SCHEDULED FOR REMOVAL IN v0.9.0. If you "
+                "still have archival chains from those versions, re-verify "
+                "and re-archive them before upgrading to v0.9.0.",
                 DeprecationWarning,
                 stacklevel=2,
             )
