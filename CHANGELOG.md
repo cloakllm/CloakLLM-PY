@@ -5,6 +5,32 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-05-19
+
+Cleanup + compliance-schema extension release. Six items: two new optional AuditEntry fields (`decision_id`, `system_version_pin`) that align with canonical_log_event v0.2; three deferred-from-v0.7.0 cleanup items (JS IPv6 normalizer, `legacy_canonical` sunset phase 1, `Shield.analyze()` default flip); one doc-only mapping section in `COMPLIANCE.md`. Drop-in safe from v0.7.0. All v0.7.0 audit chains verify under v0.7.1.
+
+### Added
+
+- **`AuditEntry.decision_id`** (optional, default `None`) -- per-inference audit anchor. ULID by default (auto-generated via embedded 30-line ULID generator -- no new runtime dep). All audit entries for a single user-facing AI decision share the same ID. Caller-supplied IDs accepted (1..64 ASCII-printable chars, no control bytes / bidi-formatting). New parameter on `Shield.sanitize/desanitize/sanitize_batch/desanitize_batch`. Propagates from sanitize to the matching desanitize via `token_map.decision_id`. New optional MCP tool param. C7.1-1 per `PLAN_v080.md`.
+- **`AuditEntry.system_version_pin`** (optional, default `None`) -- composed `<model>@<deployment_version>/<instruction_version>` string. Deployer supplies `deployment_version` + `instruction_version` via `ShieldConfig` (or `CLOAKLLM_DEPLOYMENT_VERSION` / `CLOAKLLM_INSTRUCTION_VERSION` env vars); CloakLLM composes at write time. All three components required; partial pins are emitted as `None` (no half-specified records). B3 validator caps at 256 chars. C7.1-2.
+
+### Changed
+
+- **`Shield.analyze()` default for `redact_values` flipped from `False` to `True`.** F4 deprecation warning has been in place since v0.6.1 (4 versions). Callers who want raw PII in the analyze response must now pass `redact_values=False` explicitly. The `Shield._UNSET` sentinel and the F4 warning are removed; the parameter is now a plain `bool = True`. C7.1-5.
+- **`legacy_canonical=True` sunset (phase 1).** `verify_chain(legacy_canonical=True)` and `verify_audit(legacy_canonical=True)` now emit a `DeprecationWarning` on EVERY call (previously: only the first one in some paths). The flag still works; full removal in v0.9.0. Operators with archival v0.5.x / v0.6.0 chains have one more release to re-verify and re-archive. C7.1-4.
+
+### Security (JS)
+
+- **AWS IPv6 IMDS gap closed.** The v0.6.3 JS SSRF defense had a known residual: `fd00:ec2::254` lives inside the `fc00::/7` ULA range that `_isPrivateIpv6` permits. v0.7.1 ships `_normalizeIpv6` (handles the three textual forms: compressed `::`, leading-zero `0ec2`, fully-expanded `0:0:0:0:0:0:254`) and adds `fd00:0ec2:` to the always-deny prefix list in `_isAlwaysDenyIpv6`. Cross-SDK parity with Python's v0.6.3 close. C7.1-3.
+
+### Tests
+
+- 639 -> 679 tests (+40): consolidated `test_v071_extensions.py` covering ULID generator (7), decision_id end-to-end (10), system_version_pin (7), legacy_canonical sunset (3), analyze default flip (3), backward compat (1) + parameterized cases. Cross-SDK fixtures regenerated to include both new fields. Existing `test_shield.py::TestF4` updated to assert the post-flip behavior.
+
+### Compatibility
+
+- **Backward compat:** all v0.7.0 audit chains verify under v0.7.1. The new fields are added to `AuditEntry` as `Optional` with `None` defaults; entries written by v0.7.0 don't have them and the canonical-JSON shape for those entries is unchanged when the keys are absent. Verified by `tests/test_cross_sdk_round_trip.py` against the v0.7.0 fixture corpus.
+
 ## [0.7.0] - 2026-05-19
 
 **Headline: EU AI Act Article 4a Bias Detection Workflow.**

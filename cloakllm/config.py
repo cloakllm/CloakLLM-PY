@@ -229,6 +229,19 @@ class ShieldConfig:
     # 180 = EU AI Act Article 12 minimum (6 months for deployers).
     retention_hint_days: int = 180
 
+    # --- v0.7.1 C7.1-2: system_version_pin components ---
+    # Deployer-supplied components that get composed into the audit log's
+    # `system_version_pin` field at write time. Format:
+    #   "<model>@<deployment_version>/<instruction_version>"
+    # All three components must be present for the pin to be emitted; otherwise
+    # `system_version_pin` is None. Aligns with canonical_log_event v0.2.
+    deployment_version: Optional[str] = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_DEPLOYMENT_VERSION", None)
+    )
+    instruction_version: Optional[str] = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_INSTRUCTION_VERSION", None)
+    )
+
     # --- Enterprise Key Management (v0.6.0, Python only) ---
     # Provider for attestation signing keys.
     # Accepted values: "aws_kms" | "gcp_kms" | "azure_keyvault" | "hashicorp_vault" | None

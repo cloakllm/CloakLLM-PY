@@ -27,6 +27,24 @@ from cloakllm.attestation import (
     SanitizationCertificate,
 )
 from cloakllm.context_analyzer import ContextAnalyzer
+from cloakllm._ulid import generate_ulid
+
+
+def _compose_system_version_pin(
+    model: Optional[str],
+    deployment_version: Optional[str],
+    instruction_version: Optional[str],
+) -> Optional[str]:
+    """v0.7.1 C7.1-2: compose system_version_pin from three components.
+
+    Returns the composed string (`<model>@<deployment>/<instruction>`) only
+    when all three components are present. Partial pins are returned as None
+    so deployer can't accidentally publish a half-specified version pin and
+    have it be mistaken for a complete record.
+    """
+    if not model or not deployment_version or not instruction_version:
+        return None
+    return f"{model}@{deployment_version}/{instruction_version}"
 
 
 class Shield:
@@ -133,6 +151,7 @@ class Shield:
         model: Optional[str] = None,
         provider: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
+        decision_id: Optional[str] = None,
     ) -> tuple[str, TokenMap]:
         """
         Detect and replace sensitive entities in text.
@@ -143,6 +162,11 @@ class Shield:
             model: LLM model name (for audit logging)
             provider: LLM provider name (for audit logging)
             metadata: Additional context to log
+            decision_id: Optional per-inference audit anchor. If omitted, a
+                fresh ULID is auto-generated. All audit entries for a single
+                user-facing AI decision should share this ID; pass it through
+                from sanitize() to the matching desanitize() so both entries
+                are reconciled in compliance reports. v0.7.1.
 
         Returns:
             (sanitized_text, token_map)
@@ -165,6 +189,14 @@ class Shield:
                 entity_hashing=self.config.entity_hashing,
                 entity_hash_key=self.config.entity_hash_key,
             )
+
+        # v0.7.1 C7.1-1: decision_id resolution.
+        #   - Caller-supplied wins
+        #   - Otherwise: auto-generate a fresh ULID
+        # Store on token_map so the matching desanitize() can read it back
+        # without the caller having to thread the ID through their LLM call.
+        resolved_decision_id = decision_id or generate_ulid()
+        token_map.decision_id = resolved_decision_id
 
         # Clear per-call metadata (preserves forward/reverse maps for multi-turn)
         token_map.detections.clear()
@@ -256,6 +288,11 @@ class Shield:
             certificate_hash=cert_hash,
             key_id=cert_key_id,
             risk_assessment=risk_assessment,
+            # v0.7.1 C7.1-1 / C7.1-2: compliance-schema extensions
+            decision_id=resolved_decision_id,
+            system_version_pin=_compose_system_version_pin(
+                model, self.config.deployment_version, self.config.instruction_version,
+            ),
         )
 
         return sanitized, token_map
@@ -267,6 +304,7 @@ class Shield:
         model: Optional[str] = None,
         provider: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
+        decision_id: Optional[str] = None,
     ) -> tuple[list[str], TokenMap]:
         """
         Sanitize multiple texts with a shared token map and single audit entry.
@@ -296,6 +334,10 @@ class Shield:
                 entity_hashing=self.config.entity_hashing,
                 entity_hash_key=self.config.entity_hash_key,
             )
+
+        # v0.7.1 C7.1-1: same decision_id resolution as sanitize().
+        resolved_decision_id = decision_id or generate_ulid()
+        token_map.decision_id = resolved_decision_id
 
         # Clear per-call metadata (preserves forward/reverse maps for multi-turn)
         token_map.detections.clear()
@@ -420,6 +462,11 @@ class Shield:
             metadata=audit_metadata,
             certificate_hash=cert_hash,
             key_id=cert_key_id,
+            # v0.7.1 C7.1-1 / C7.1-2
+            decision_id=resolved_decision_id,
+            system_version_pin=_compose_system_version_pin(
+                model, self.config.deployment_version, self.config.instruction_version,
+            ),
         )
 
         return sanitized_texts, token_map
@@ -431,6 +478,7 @@ class Shield:
         model: Optional[str] = None,
         provider: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
+        decision_id: Optional[str] = None,
     ) -> list[str]:
         """
         Desanitize multiple texts using a shared token map.
@@ -478,6 +526,9 @@ class Shield:
             if ed.get("token") in present_token_set
         ]
 
+        # v0.7.1 C7.1-1: same decision_id resolution as desanitize().
+        resolved_decision_id = decision_id or getattr(token_map, "decision_id", None)
+
         self.audit.log(
             event_type="desanitize_batch",
             original_text="",
@@ -492,6 +543,11 @@ class Shield:
             entity_details=present_entity_details,  # H3
             timing=timing,
             metadata=metadata,
+            # v0.7.1 C7.1-1 / C7.1-2
+            decision_id=resolved_decision_id,
+            system_version_pin=_compose_system_version_pin(
+                model, self.config.deployment_version, self.config.instruction_version,
+            ),
         )
 
         return results
@@ -503,6 +559,7 @@ class Shield:
         model: Optional[str] = None,
         provider: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
+        decision_id: Optional[str] = None,
     ) -> str:
         """
         Replace tokens in LLM response with original values.
@@ -576,6 +633,10 @@ class Shield:
         # Pre-v0.6.3 chains can be re-verified with
         #   shield.verify_audit(legacy_desanitize_hash=True)
         # See verify_chain() for the deprecation path (sunset v0.7.0).
+        # v0.7.1 C7.1-1: decision_id propagation. Caller override wins;
+        # otherwise inherit from token_map (set during the matching sanitize).
+        resolved_decision_id = decision_id or getattr(token_map, "decision_id", None)
+
         self.audit.log(
             event_type="desanitize",
             original_text=text,
@@ -590,38 +651,29 @@ class Shield:
             entity_details=present_entity_details,  # H3: subset filter
             timing=timing,
             metadata=metadata,
+            # v0.7.1 C7.1-1 / C7.1-2
+            decision_id=resolved_decision_id,
+            system_version_pin=_compose_system_version_pin(
+                model, self.config.deployment_version, self.config.instruction_version,
+            ),
         )
 
         return result
 
-    # F4 sentinel — distinguishes "user passed False explicitly" from
-    # "user didn't pass anything." Used to fire the v0.7.0 default-flip warning.
-    _UNSET = object()
-
-    def analyze(self, text: str, redact_values: Any = _UNSET) -> dict:
+    def analyze(self, text: str, redact_values: bool = True) -> dict:
         """
         Analyze text for sensitive data without modifying it.
 
-        WARNING: By default (v0.6.x), the return value contains raw PII in the
-        'text' field of each entity. Set ``redact_values=True`` to replace with
-        '[redacted]'. Never log or transmit the output of this method without
-        redaction.
+        Returns detected entities with category / position / confidence /
+        detection source. By default, the per-entity `text` field is replaced
+        with ``"[redacted]"`` so the analysis output is itself PII-free.
 
-        v0.7.0 will flip the default to ``True``. To silence the deprecation
-        warning, pass ``redact_values`` explicitly.
+        v0.7.1 C7.1-5: the default for ``redact_values`` flipped from False
+        to True. The F4 deprecation warning has been in place since v0.6.1;
+        callers who relied on the old default (raw PII in the response) must
+        now pass ``redact_values=False`` explicitly. No warning is emitted
+        when the value is explicit -- only the old default path is gone.
         """
-        if redact_values is Shield._UNSET:
-            import warnings as _w
-            _w.warn(
-                "Shield.analyze() default for `redact_values` will change "
-                "from False to True in v0.7.0. The current default RETURNS "
-                "RAW PII in the response. Pass `redact_values=False` "
-                "explicitly to keep current behaviour, or `redact_values=True` "
-                "to redact (recommended).",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            redact_values = False
         self._check_input_length(text)
         detections, _ = self.detector.detect(text)
         return {
