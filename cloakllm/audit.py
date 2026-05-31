@@ -109,6 +109,94 @@ _BIAS_VALID_EVENT_TYPES = frozenset({
     "bias_session_start", "bias_pseudonymise", "bias_finding", "bias_session_end",
 })
 
+# v0.8.1 KM-3: key_registered event puts the key's introduction on the
+# tamper-evident chain. The full KeyManifest is carried inline in
+# `key_manifest` so verification is self-contained (no out-of-band lookup).
+_KEY_REGISTERED_EVENT_TYPE = "key_registered"
+
+_KEY_MANIFEST_ALLOWED_KEYS = frozenset({
+    "key_id", "public_key", "deployer_id",
+    "valid_from", "valid_until", "purpose",
+    "manifest_version", "manifest_hash",
+    "root_signature", "root_key_id",
+})
+
+# Per-field shape caps mirror derive_key_manifest() validation, but apply
+# at the audit-write boundary too (defence-in-depth for hand-crafted
+# entries that bypass the factory).
+_KEY_MANIFEST_STR_MAX_LEN = {
+    "key_id": 64,
+    "public_key": 64,           # base64 of 32 bytes = 44 chars; cap at 64 for safety
+    "deployer_id": 256,
+    "valid_from": 64,
+    "valid_until": 64,
+    "purpose": 64,
+    "manifest_version": 16,
+    "manifest_hash": 128,       # sha256 hex = 64 chars; cap higher
+    "root_signature": 128,      # base64 of 64 bytes = 88 chars; cap higher
+    "root_key_id": 256,
+}
+
+_KEY_MANIFEST_REQUIRED_KEYS = frozenset({
+    "key_id", "public_key", "deployer_id",
+    "valid_from", "purpose", "manifest_version", "manifest_hash",
+})
+
+
+def _validate_key_manifest(km: dict) -> None:
+    """v0.8.1 KM-3: validate the `key_manifest` field on key_registered events.
+
+    Strict allow-list + per-field type and length caps. AUDIT-3 hardening
+    applied from day 1 (defends against hand-crafted entries that bypass
+    derive_key_manifest()'s factory-level validation).
+
+    Raises RuntimeError on any violation.
+    """
+    if not isinstance(km, dict):
+        raise RuntimeError(
+            f"AUDIT SCHEMA VIOLATION: key_manifest must be a dict "
+            f"(got {type(km).__name__})."
+        )
+    # Required keys
+    for required in _KEY_MANIFEST_REQUIRED_KEYS:
+        if required not in km:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: key_manifest missing required field {required!r}."
+            )
+    for k, v in km.items():
+        if not isinstance(k, str):
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: key_manifest key {k!r} must be a string."
+            )
+        if k not in _KEY_MANIFEST_ALLOWED_KEYS:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: key_manifest contains disallowed "
+                f"key {k!r}. Allowed: {sorted(_KEY_MANIFEST_ALLOWED_KEYS)}."
+            )
+        # Type + length checks. valid_until / root_signature / root_key_id
+        # are optional and may be None.
+        if v is None:
+            if k in _KEY_MANIFEST_REQUIRED_KEYS:
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: key_manifest.{k} must not be null."
+                )
+            continue
+        if not isinstance(v, str):
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: key_manifest.{k} must be a string "
+                f"(got {type(v).__name__})."
+            )
+        limit = _KEY_MANIFEST_STR_MAX_LEN.get(k, 256)
+        if len(v) > limit:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: key_manifest.{k} exceeds {limit} chars "
+                f"(got {len(v)})."
+            )
+        if "\x00" in v:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: key_manifest.{k} contains NUL byte."
+            )
+
 
 def _validate_bias_context(ctx: dict) -> None:
     """v0.7.0 A4a-3: validate the `bias_context` field shape.
@@ -373,6 +461,20 @@ def _validate_audit_entry_schema(entry_data: dict) -> None:
                 f"{sorted(_BIAS_VALID_EVENT_TYPES)} (got {ev!r})."
             )
 
+    # v0.8.1 KM-3: key_manifest (key_registered events for externally-
+    # verifiable key provenance). Same coupling pattern as bias_context:
+    # key_manifest may ONLY appear on key_registered events, never on
+    # arbitrary sanitize/desanitize entries.
+    key_manifest = entry_data.get("key_manifest")
+    if key_manifest is not None:
+        _validate_key_manifest(key_manifest)
+        ev = entry_data.get("event_type")
+        if ev != _KEY_REGISTERED_EVENT_TYPE:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: key_manifest requires "
+                f"event_type='{_KEY_REGISTERED_EVENT_TYPE}' (got {ev!r})."
+            )
+
 
 def _assert_no_pii_in_entry(entry_data: dict) -> None:
     """
@@ -420,6 +522,12 @@ class AuditEntry:
     system_version_pin: Optional[str] = None  # Composed model@deployment/instruction
                                               # version pin. Optional; deployer supplies
                                               # deployment/instruction via ShieldConfig.
+    # --- v0.8.1 KM-3 -- Externally-Verifiable Key Provenance ---
+    key_manifest: Optional[dict[str, Any]] = None  # Full KeyManifest carried inline
+                                                   # in key_registered events. Allow-
+                                                   # duplicate emission policy (verifier
+                                                   # dedups by manifest_hash). Only valid
+                                                   # on event_type='key_registered'.
 
 
 # v0.6.4 BUG-3: single source of truth -- derive the allow-list from the
@@ -644,6 +752,7 @@ class AuditLogger:
         bias_context: Optional[dict[str, Any]] = None,
         decision_id: Optional[str] = None,
         system_version_pin: Optional[str] = None,
+        key_manifest: Optional[dict[str, Any]] = None,
     ) -> Optional[AuditEntry]:
         """
         Append a new entry to the audit log.
@@ -683,6 +792,8 @@ class AuditLogger:
                 # v0.7.1 C7.1-1 / C7.1-2: compliance-schema extensions
                 "decision_id": decision_id,
                 "system_version_pin": system_version_pin,
+                # v0.8.1 KM-3: key_manifest -- only present on key_registered events.
+                "key_manifest": key_manifest,
             }
 
             # Compliance mode injection (v0.6.0) -- fields are part of the hash chain.
@@ -694,6 +805,11 @@ class AuditLogger:
                 # compliance reports can group them.
                 if event_type in _BIAS_VALID_EVENT_TYPES:
                     article_refs.append("EU_AI_Act_Art_4a")
+                # v0.8.1 KM-3: key_registered events are the cryptographic
+                # backbone of Article 19 ("automatically generated logs").
+                # The Art_19 article_ref is already present (compliance mode
+                # always claims it) -- no additional ref needed here, but
+                # noted for clarity.
                 entry_data["article_ref"] = article_refs
                 entry_data["retention_hint_days"] = self.config.retention_hint_days
                 entry_data["pii_in_log"] = False

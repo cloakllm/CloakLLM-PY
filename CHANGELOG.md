@@ -5,6 +5,33 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-05-31
+
+**Headline: KeyManifest -- externally-verifiable key provenance.** v0.8.0 lets your compliance officer generate Article 12 audit reports. v0.8.1 lets the EU AI Office's auditor verify those reports without trusting CloakLLM, your deployer, or anyone else's word about which keys are real. The audit chain stands on its own.
+
+Drop-in safe from v0.8.0. All v0.6.x / v0.7.x / v0.8.0 audit chains verify under v0.8.1 unchanged.
+
+### Added
+
+- **`KeyManifest` dataclass + `derive_key_manifest()`** (KM-1) -- binds a signing key to a deployer identity and validity window. Optional offline-root signing via `root_signing_callback` (KM-4): the CloakLLM runtime never holds the root key, only the active key. Deterministic `manifest_hash` via canonical-JSON of all fields. Cross-SDK byte-equivalent with the JS mirror.
+- **`verify_key_provenance()` + `ProvenanceReport`** (KM-2) -- five independent checks (signature_valid, key_id_matches, within_validity_window, manifest_hash_consistent, root_signature_status). Structured ProvenanceReport (not a bool) so auditors cite specific findings. **Strict zero-tolerance timestamps by default** (no silent NTP fudge factor that could miss a backdated-by-30s attack); opt-in `clock_skew_seconds=N` for distributed-clock tolerance. Backward-compat: `manifest=None` falls through to signature-only check with `provenance_status='UNVERIFIED'`.
+- **`key_registered` audit event** (KM-3) -- Shield emits one on init when `deployer_id` is configured (via `ShieldConfig` or `CLOAKLLM_DEPLOYER_ID`). Full inline `key_manifest` carried in the event (self-contained verification, no out-of-band lookup). **Allow-duplicate emission policy** (PLAN_v081.md Decision 3): two Shield processes starting concurrently with the same key both emit -- verifier dedups by `manifest_hash`. No locking, no race window, append-only audit chain. B3 schema extended with `key_manifest` field; coupling check rejects `key_manifest` on non-`key_registered` events (same pattern as `bias_context`).
+- **`Shield.generate_compliance_report()` aggregator** (KM-9) -- fills the v0.8.0-reserved `attestation.provenance_summary` slot from `key_registered` events: `manifests_found`, `manifests_valid`, `within_validity_window_pct`, `root_signature_status_distribution`. **Pre-v0.8.1 chains keep the slot all-null** (additive back-compat invariant -- a v0.8.0 chain re-verified under v0.8.1 produces a byte-identical report).
+- **`cloakllm key-manifest` CLI** (KM-5) -- three actions: `generate` (one-time ceremony with `--root-key` for offline signing), `verify` (auditor checks cert+manifest pair, exit 0/1 for CI gating), `show` (read-only inspect). ASCII-only output (`[OK]` / `[FAIL]`) per the v0.7.0 cp1252 lesson.
+- **`ShieldConfig.deployer_id` + `key_valid_from` + `key_valid_until`** (and `CLOAKLLM_DEPLOYER_ID` / `CLOAKLLM_KEY_VALID_FROM` / `CLOAKLLM_KEY_VALID_UNTIL` env) -- the runtime trigger for `key_registered` emission.
+- **AUDIT-3 hardening from day 1** -- `_validate_iso8601_utc`, `_validate_key_manifest`, `_parse_iso8601_safe` reject malformed timestamps, non-string fields, NUL bytes, oversized strings, missing required fields. 4 explicit adversarial-input tests defend against future regressions.
+
+### Tests
+
+- 710 -> 748 tests (+38). New `tests/test_key_manifest.py` covers KM-1 (12 tests), KM-2 (10 tests), KM-3 (6 tests), AUDIT-3 hardening (6 tests), KM-7 back-compat (2 tests). `tests/test_compliance_report.py` adds 2 KM-9 tests (pre-v0.8.1 stays all-null, v0.8.1 fills the slot). Cross-SDK byte-equivalent canonical JSON output verified (900 bytes Py == JS) for v0.8.1 reports.
+
+### Compatibility
+
+- All v0.6.x / v0.7.x / v0.8.0 audit chains verify under v0.8.1 unchanged.
+- `Shield._attestation_key` / `cert.verify(public_key)` API is unchanged. KeyManifest is opt-in additive.
+- New `key_manifest` field on `AuditEntry` is `Optional[dict[str, Any]]` defaulting to `None`. Pre-v0.8.1 entries deserialize unchanged.
+- v0.8.0 forward-compat `attestation.provenance_summary` slot is filled (was all-null in v0.8.0).
+
 ## [0.8.0] - 2026-05-31
 
 **Headline: `Shield.generate_compliance_report()` -- end-to-end EU AI Act audit reports.** v0.6.0 shipped Article 12 Compliance Mode. v0.7.0 added Article 4a bias-detection. v0.7.1 added `decision_id` and `system_version_pin`. v0.8.0 turns those into a regulator-facing report: one call reduces the audit chain to a per-article rollup (Article 12 evidence event count, Article 4a bias sessions with `wipe_confirmed` rate, Article 19 hash-chain verdict), reconciles cross-article events via `decision_id`, and prints a COMPLIANT / NON_COMPLIANT verdict with human-readable reasons. Output in JSON (canonical structured contract), Markdown (human-readable narrative for DPO/compliance officer), or PDF (regulator-ready, via optional `[reporting]` extras dependency on `reportlab>=4.0`).

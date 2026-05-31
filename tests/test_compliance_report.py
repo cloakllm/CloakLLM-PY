@@ -449,3 +449,43 @@ class TestBuildReportAdversarialInputs:
             cloakllm_version="0.8.0",
         )
         assert r["per_article"] == {}
+
+
+# v0.8.1 KM-9: ProvenanceReport aggregator wires into attestation.provenance_summary
+class TestProvenanceSummary:
+    def test_pre_v081_chain_stays_null(self):
+        """v0.8.0 chains have no key_registered events -> all 4 fields null."""
+        entries = [
+            {"seq": 0, "timestamp": "2026-05-30T12:00:00+00:00",
+             "event_type": "sanitize", "article_ref": ["EU_AI_Act_Art_12"],
+             "key_id": "k1", "certificate_hash": "h0"},
+        ]
+        r = build_report(audit_entries=entries,
+            period=ReportPeriod(None, None), cloakllm_version="0.8.1")
+        ps = r["attestation"]["provenance_summary"]
+        assert ps["manifests_found"] is None
+        assert ps["manifests_valid"] is None
+        assert ps["within_validity_window_pct"] is None
+        assert ps["root_signature_status_distribution"] is None
+
+    def test_v081_chain_fills_fields(self, tmp_path):
+        kp = DeploymentKeyPair.generate()
+        cfg = ShieldConfig(
+            audit_enabled=True, log_dir=str(tmp_path),
+            compliance_mode="eu_ai_act_article12", attestation_key=kp,
+            deployer_id="acme",
+            key_valid_from="2026-01-01T00:00:00+00:00",
+            key_valid_until="2027-01-01T00:00:00+00:00",
+        )
+        sh = Shield(config=cfg)
+        sh.sanitize("email a@b.com")
+        sh.sanitize("email c@d.com")
+        rep = sh.generate_compliance_report()
+        ps = rep["attestation"]["provenance_summary"]
+        assert ps["manifests_found"] == 1
+        assert ps["manifests_valid"] == 1
+        assert ps["root_signature_status_distribution"]["NOT_REQUESTED"] == 1
+
+
+# Need imports at top -- pytest will resolve
+from cloakllm import DeploymentKeyPair

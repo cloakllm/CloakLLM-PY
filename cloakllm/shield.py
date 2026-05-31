@@ -104,6 +104,18 @@ class Shield:
         ):
             self._log_key_rotation_event()
 
+        # v0.8.1 KM-3: emit a key_registered event once on init when the
+        # deployer has set deployer_id (the trigger for the externally-
+        # verifiable provenance flow). Allow-duplicate emission: concurrent
+        # Shield inits with the same key both emit; verifier dedups by
+        # manifest_hash. See PLAN_v081.md Decision 3.
+        if (
+            self._attestation_key is not None
+            and self.config.audit_enabled
+            and self.config.deployer_id
+        ):
+            self._emit_key_registered_event()
+
     def _empty_metrics(self) -> dict[str, Any]:
         backends = getattr(self, 'detector', None)
         detection_keys = {f"{b.name}_ms": 0.0 for b in (backends._backends if backends else [])}
@@ -881,6 +893,50 @@ class Shield:
             ) from e
         render_pdf(report, out_path)
         return out_path
+
+    def _emit_key_registered_event(self) -> None:
+        """v0.8.1 KM-3: emit a key_registered audit event binding the
+        signing key to a KeyManifest.
+
+        Allow-duplicate emission policy (Decision 3 in PLAN_v081.md): two
+        Shield processes starting concurrently with the same key both emit
+        identical key_registered events. Verifier dedups by manifest_hash.
+        No locking, no race window, audit chain stays append-only.
+
+        Triggered on Shield.__init__ when ALL of:
+          - audit logging is enabled
+          - an attestation key is configured (key_path, kms provider, or explicit)
+          - config.deployer_id is set
+        """
+        from cloakllm.attestation import derive_key_manifest
+
+        try:
+            keypair = self._attestation_key
+            if keypair is None:
+                return  # No signing key -> nothing to bind a manifest to.
+
+            # Build the manifest using the keypair's own metadata (key_id /
+            # public_key) plus the deployer's identity from config. The
+            # callback hook for offline root signing is NOT exercised here
+            # -- root_signature is set via the CLI ceremony (KM-4 / KM-5).
+            manifest = derive_key_manifest(
+                keypair,
+                deployer_id=self.config.deployer_id,
+                valid_from=self.config.key_valid_from,
+                valid_until=self.config.key_valid_until,
+            )
+            self.audit.log(
+                event_type="key_registered",
+                key_id=manifest.key_id,
+                key_manifest=manifest.to_dict(),
+            )
+        except Exception as e:
+            # Non-fatal -- key_registered is observability + attestation
+            # provenance, not a correctness invariant for sanitize/desanitize.
+            import logging as _logging
+            _logging.getLogger("cloakllm.shield").warning(
+                "Failed to emit key_registered event: %s", e
+            )
 
     def _log_key_rotation_event(self) -> None:
         """
