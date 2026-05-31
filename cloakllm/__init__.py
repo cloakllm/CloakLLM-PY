@@ -19,7 +19,7 @@ Standalone usage:
     # sanitized: "Send email to [EMAIL_0] about [ORG_0]"
 """
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"
 
 from cloakllm.shield import Shield
 from cloakllm.config import ShieldConfig
@@ -34,6 +34,13 @@ from cloakllm.attestation import (
     SanitizationCertificate,
     MerkleTree,
     derive_entity_hash_key,
+    # v0.8.1 KM-1: externally-verifiable key provenance
+    KeyManifest,
+    derive_key_manifest,
+    KEY_MANIFEST_SCHEMA_VERSION,
+    # v0.8.1 KM-2: ProvenanceReport + verify_key_provenance
+    ProvenanceReport,
+    verify_key_provenance,
 )
 from cloakllm.context_analyzer import ContextAnalyzer, RiskAssessment
 from cloakllm.backends import DetectorBackend, RegexBackend, NerBackend, LlmBackend
@@ -81,6 +88,11 @@ __all__ = [
     "SanitizationCertificate",
     "MerkleTree",
     "derive_entity_hash_key",
+    "KeyManifest",
+    "derive_key_manifest",
+    "KEY_MANIFEST_SCHEMA_VERSION",
+    "ProvenanceReport",
+    "verify_key_provenance",
     "ContextAnalyzer",
     "RiskAssessment",
     "validate_token",

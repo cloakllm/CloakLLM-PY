@@ -101,6 +101,147 @@ def _empty_attestation() -> dict:
     }
 
 
+def _fill_provenance_summary(
+    *,
+    audit_entries_replay: list[dict],
+    period: "ReportPeriod",
+    attestation: dict,
+) -> None:
+    """v0.8.1 KM-9: aggregate ProvenanceReports into attestation.provenance_summary.
+
+    Walks the chain to find `key_registered` events, dedups manifests by
+    `manifest_hash` (per Decision 3: allow-duplicate emission), then runs
+    `verify_key_provenance` for every certified entry whose `key_id` resolves
+    to a known manifest. Fills:
+
+      manifests_found              -- unique manifest_hash count
+      manifests_valid              -- count where overall_valid=True
+      within_validity_window_pct   -- % certified entries inside their key's window
+      root_signature_status_distribution -- {VALID, INVALID, NOT_REQUESTED, UNVERIFIED_NO_KEY}
+
+    When no `key_registered` events exist (pre-v0.8.1 chains), all four
+    fields stay null -- same as v0.8.0. The provenance check is purely
+    additive: a v0.8.0 chain re-verified under v0.8.1 produces a byte-
+    identical report (same null fields, same overall structure).
+
+    The aggregator does NOT verify root signatures because v0.8.1 does not
+    ship a root-key directory -- auditors supply root_public_key out-of-band
+    via the CLI (`cloakllm key-manifest verify --root-public-key`). We
+    report root_signature_status from the manifest's own claim only.
+    """
+    from cloakllm.attestation import (
+        KeyManifest, verify_key_provenance,
+        ROOT_SIG_VALID, ROOT_SIG_NOT_REQUESTED, ROOT_SIG_UNVERIFIED_NO_KEY,
+        SanitizationCertificate,
+    )
+
+    # Resolve KeyManifests from key_registered events. Dedup by manifest_hash.
+    manifests_by_key_id: dict[str, KeyManifest] = {}
+    seen_hashes: set[str] = set()
+    for entry in audit_entries_replay:
+        if entry.get("event_type") != "key_registered":
+            continue
+        if not _in_period(entry.get("timestamp"), period):
+            continue
+        km_dict = entry.get("key_manifest")
+        if not isinstance(km_dict, dict):
+            continue
+        h = km_dict.get("manifest_hash")
+        if not isinstance(h, str) or h in seen_hashes:
+            continue
+        try:
+            km = KeyManifest.from_dict(km_dict)
+        except Exception:
+            # Malformed manifest -- skip silently. The B3 validator should
+            # have caught this at write time; defensive skip at read time.
+            continue
+        seen_hashes.add(h)
+        manifests_by_key_id[km.key_id] = km
+
+    if not manifests_by_key_id:
+        # No key_registered events -- leave the provenance_summary all-null
+        # (back-compat with v0.8.0 reports).
+        return
+
+    # Aggregate per-cert checks. We synthesize lightweight cert objects from
+    # the audit entry fields needed by verify_key_provenance (key_id +
+    # timestamp). The cert's signature is presumed valid because the chain
+    # itself verified -- we focus on provenance dimensions here.
+    manifests_valid = 0
+    within_window_n = 0
+    within_window_total = 0
+    root_distribution = {
+        "VALID": 0, "INVALID": 0,
+        "NOT_REQUESTED": 0, "UNVERIFIED_NO_KEY": 0,
+    }
+
+    # First evaluate each unique manifest once for overall validity
+    # (signature side handled per-cert below; manifest_hash + root sig +
+    # purpose checks fire here).
+    for km in manifests_by_key_id.values():
+        # Synthesize a placeholder cert whose timestamp is the key's own
+        # valid_from -- exercises the manifest_hash + root_signature checks
+        # without depending on any real cert.
+        placeholder = SanitizationCertificate(
+            timestamp=km.valid_from,
+            key_id=km.key_id,
+            public_key=km.public_key,
+        )
+        # Note: signature check will fail on placeholder (no sig) but we
+        # only inspect the structural dimensions.
+        report = verify_key_provenance(placeholder, km)
+        # Manifest is "valid" iff its hash is consistent and (if root claimed)
+        # the root status isn't INVALID. We don't have root keys here so
+        # UNVERIFIED_NO_KEY does NOT disqualify the manifest.
+        manifest_is_valid = (
+            report.manifest_hash_consistent
+            and report.root_signature_status != "INVALID"
+        )
+        if manifest_is_valid:
+            manifests_valid += 1
+        root_distribution[report.root_signature_status] = \
+            root_distribution.get(report.root_signature_status, 0) + 1
+
+    # Per-cert: count window membership across the chain.
+    for entry in audit_entries_replay:
+        if entry.get("event_type") == "key_registered":
+            continue
+        if not entry.get("certificate_hash"):
+            continue
+        if not _in_period(entry.get("timestamp"), period):
+            continue
+        kid = entry.get("key_id")
+        if not kid or kid not in manifests_by_key_id:
+            continue
+        within_window_total += 1
+        km = manifests_by_key_id[kid]
+        synth = SanitizationCertificate(
+            timestamp=entry.get("timestamp", ""),
+            key_id=kid,
+            public_key=km.public_key,
+        )
+        report = verify_key_provenance(synth, km)
+        if report.within_validity_window:
+            within_window_n += 1
+
+    # v0.7.0 numeric-parity lesson: whole-number percentages are emitted as
+    # int in both SDKs (Python json.dumps(100) == JS JSON.stringify(100) ==
+    # "100"; vs the float "100.0" vs int "100" divergence we'd hit otherwise).
+    if within_window_total:
+        pct = round(100.0 * within_window_n / within_window_total, 2)
+    else:
+        pct = 0
+    if isinstance(pct, float) and pct == int(pct):
+        pct = int(pct)
+
+    attestation["provenance_summary"] = {
+        "manifests_found": len(manifests_by_key_id),
+        "manifests_valid": manifests_valid,
+        "within_validity_window_pct": pct,
+        "root_signature_status_distribution": root_distribution,
+    }
+
+
 # --- Core builder ---
 
 
@@ -138,6 +279,13 @@ def build_report(
     Returns:
         A dict matching `examples/compliance_report_schema.json`.
     """
+    # v0.8.1 KM-9: materialise once so we can rewalk for provenance_summary
+    # without forcing callers to buffer themselves. For typical compliance
+    # report chains (thousands to millions of entries) this is fine; very
+    # large chains are paged by period.
+    audit_entries_buffered = list(audit_entries)
+    audit_entries = audit_entries_buffered
+
     # Aggregates
     seen_articles: set[str] = set()
     article_stats: dict[str, dict[str, Any]] = {}
@@ -330,6 +478,15 @@ def build_report(
     attestation["entries_with_certificates"] = entries_with_certs
     attestation["signatures_valid"] = signatures_valid
     attestation["key_ids"] = sorted(key_ids)
+
+    # v0.8.1 KM-9: fill in provenance_summary from key_registered events.
+    # Pre-v0.8.1 chains have no key_registered events -- provenance_summary
+    # stays all-null (additive back-compat with v0.8.0 reports).
+    _fill_provenance_summary(
+        audit_entries_replay=audit_entries_buffered,
+        period=period,
+        attestation=attestation,
+    )
 
     report: dict[str, Any] = {
         "report_metadata": {

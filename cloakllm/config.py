@@ -242,6 +242,25 @@ class ShieldConfig:
         default_factory=lambda: os.getenv("CLOAKLLM_INSTRUCTION_VERSION", None)
     )
 
+    # --- v0.8.1 KM-3: deployer identity for KeyManifest ---
+    # Free-form deployer identifier (org name, system ID, URN, whatever the
+    # deployer uses). When set alongside an attestation key, Shield emits a
+    # key_registered audit event on first init binding the signing key to
+    # this deployer. Auditors use this + the manifest_hash to verify
+    # signatures without trusting CloakLLM. See PLAN_v081.md.
+    deployer_id: Optional[str] = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_DEPLOYER_ID", None)
+    )
+    # Optional validity window for the KeyManifest (ISO 8601 UTC).
+    # When key_valid_until is None the manifest is open-ended (documented as
+    # less-secure; compliance-grade deployers SHOULD set a rotation horizon).
+    key_valid_from: Optional[str] = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_KEY_VALID_FROM", None)
+    )
+    key_valid_until: Optional[str] = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_KEY_VALID_UNTIL", None)
+    )
+
     # --- Enterprise Key Management (v0.6.0, Python only) ---
     # Provider for attestation signing keys.
     # Accepted values: "aws_kms" | "gcp_kms" | "azure_keyvault" | "hashicorp_vault" | None

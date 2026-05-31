@@ -195,6 +195,121 @@ def cmd_compliance_report(args):
         sys.exit(1)
 
 
+# --- v0.8.1 KM-5: key-manifest CLI -----------------------------------
+
+def cmd_key_manifest_generate(args):
+    """Generate a KeyManifest binding a signing key to a deployer identity.
+
+    The optional --root-key flow is the OFFLINE CEREMONY that anchors the
+    chain of trust. The signing process here loads the root key from disk
+    and signs the manifest_hash; the resulting manifest's root_signature
+    is verifiable later by any auditor who has the root public key. The
+    CloakLLM runtime never needs the root key after this generation step.
+    """
+    from cloakllm.attestation import DeploymentKeyPair, derive_key_manifest
+
+    keypair = DeploymentKeyPair.from_file(args.signing_key_path)
+
+    root_signing_callback = None
+    if args.root_key:
+        if not args.root_key_id:
+            print("[FAIL] --root-key-id is required when --root-key is supplied", file=sys.stderr)
+            sys.exit(1)
+        root_kp = DeploymentKeyPair.from_file(args.root_key)
+        def _sign(data: bytes) -> bytes:
+            return root_kp.sign(data)
+        root_signing_callback = _sign
+
+    manifest = derive_key_manifest(
+        keypair,
+        deployer_id=args.deployer_id,
+        valid_from=args.valid_from,
+        valid_until=args.valid_until,
+        root_signing_callback=root_signing_callback,
+        root_key_id=args.root_key_id,
+    )
+    out_path = Path(args.out)
+    if out_path.parent and not out_path.parent.exists():
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(manifest.to_dict(), indent=2) + "\n", encoding="utf-8")
+    print(f"[OK] Wrote KeyManifest to {out_path}")
+    print(f"     key_id={manifest.key_id} deployer_id={manifest.deployer_id}")
+    print(f"     manifest_hash={manifest.manifest_hash}")
+    if manifest.root_signature:
+        print(f"     root_key_id={manifest.root_key_id} (root-signed)")
+    else:
+        print(f"     root_signature=null (self-published; not the security boundary)")
+
+
+def cmd_key_manifest_verify(args):
+    """Verify a (certificate, KeyManifest) pair.
+
+    Exit 0 = overall_valid=True. Exit 1 = any required check failed.
+    Auditors can wire this into CI gates.
+    """
+    import base64
+    from cloakllm.attestation import (
+        KeyManifest, SanitizationCertificate, verify_key_provenance,
+    )
+
+    manifest_data = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
+    cert_data = json.loads(Path(args.certificate).read_text(encoding="utf-8"))
+    manifest = KeyManifest.from_dict(manifest_data)
+    cert = SanitizationCertificate.from_dict(cert_data)
+
+    root_pk_bytes = None
+    if args.root_public_key:
+        pk_data = json.loads(Path(args.root_public_key).read_text(encoding="utf-8"))
+        # Accept either 'public_key' (base64) or 'public_key_hex'.
+        if "public_key" in pk_data:
+            root_pk_bytes = base64.b64decode(pk_data["public_key"])
+        elif "public_key_hex" in pk_data:
+            root_pk_bytes = bytes.fromhex(pk_data["public_key_hex"])
+        else:
+            print("[FAIL] root public key file must contain 'public_key' "
+                  "(base64) or 'public_key_hex'", file=sys.stderr)
+            sys.exit(1)
+
+    report = verify_key_provenance(cert, manifest, root_public_key=root_pk_bytes)
+
+    if args.format == "json":
+        print(json.dumps(report.to_dict(), indent=2))
+    else:
+        status_marker = "[OK]" if report.overall_valid else "[FAIL]"
+        print(f"{status_marker} provenance_status: {report.provenance_status}")
+        print(f"      overall_valid:            {report.overall_valid}")
+        print(f"      signature_valid:          {report.signature_valid}")
+        print(f"      key_id_matches:           {report.key_id_matches}")
+        print(f"      within_validity_window:   {report.within_validity_window}")
+        print(f"      root_signature_status:    {report.root_signature_status}")
+        print(f"      manifest_hash_consistent: {report.manifest_hash_consistent}")
+        if report.notes:
+            print(f"      notes:")
+            for n in report.notes:
+                print(f"        * {n}")
+
+    if not report.overall_valid:
+        sys.exit(1)
+
+
+def cmd_key_manifest_show(args):
+    """Pretty-print a manifest's fields in human-readable form."""
+    manifest_data = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
+    print(f"KeyManifest:")
+    print(f"  key_id:           {manifest_data.get('key_id')}")
+    print(f"  deployer_id:      {manifest_data.get('deployer_id')}")
+    print(f"  purpose:          {manifest_data.get('purpose')}")
+    print(f"  valid_from:       {manifest_data.get('valid_from')}")
+    print(f"  valid_until:      {manifest_data.get('valid_until') or '(open-ended)'}")
+    print(f"  manifest_version: {manifest_data.get('manifest_version')}")
+    print(f"  manifest_hash:    {manifest_data.get('manifest_hash')}")
+    root_sig = manifest_data.get('root_signature')
+    if root_sig:
+        print(f"  root_signature:   present (root_key_id={manifest_data.get('root_key_id')})")
+    else:
+        print(f"  root_signature:   null (self-published; not the security boundary)")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="cloakllm",
@@ -269,6 +384,62 @@ def main():
         help="Include per-decision_id rollup (large on high-volume chains).",
     )
 
+    # key-manifest (v0.8.1 KM-5) -- externally-verifiable key provenance.
+    # Three actions: generate (one-time ceremony to bind a key to a deployer),
+    # verify (an auditor checks a cert+manifest pair), show (read-only inspect).
+    km_parser = subparsers.add_parser(
+        "key-manifest",
+        help="Manage externally-verifiable key provenance (v0.8.1+)",
+    )
+    km_sub = km_parser.add_subparsers(dest="km_action", help="Action")
+
+    # generate
+    km_gen = km_sub.add_parser(
+        "generate",
+        help="Generate a KeyManifest binding a signing key to a deployer identity",
+    )
+    km_gen.add_argument("--signing-key-path", required=True,
+                        help="Path to the signing keypair JSON file (DeploymentKeyPair).")
+    km_gen.add_argument("--deployer-id", required=True,
+                        help="Free-form deployer identifier (org name, URN, etc.). 1..256 chars.")
+    km_gen.add_argument("--valid-from", default=None,
+                        help="ISO 8601 UTC. Default: now.")
+    km_gen.add_argument("--valid-until", default=None,
+                        help="ISO 8601 UTC. Default: open-ended (less secure).")
+    km_gen.add_argument("--root-key", default=None,
+                        help="OPTIONAL path to an offline root key file. "
+                             "When set, --root-key-id is required, and the "
+                             "manifest's manifest_hash will be signed by the "
+                             "root key. The runtime never holds this key.")
+    km_gen.add_argument("--root-key-id", default=None,
+                        help="Identifier of the root key (required iff --root-key set).")
+    km_gen.add_argument("--out", required=True,
+                        help="Output file path for the manifest JSON.")
+
+    # verify
+    km_ver = km_sub.add_parser(
+        "verify",
+        help="Verify a (certificate, KeyManifest) pair",
+    )
+    km_ver.add_argument("--manifest", required=True,
+                        help="Path to manifest JSON file.")
+    km_ver.add_argument("--certificate", required=True,
+                        help="Path to certificate JSON file.")
+    km_ver.add_argument("--root-public-key", default=None,
+                        help="OPTIONAL path to root public key (32-byte raw, "
+                             "base64-encoded in a JSON file with field 'public_key'). "
+                             "Required to verify the manifest's root_signature.")
+    km_ver.add_argument("--format", choices=["json", "text"], default="text",
+                        help="Output format.")
+
+    # show
+    km_show = km_sub.add_parser(
+        "show",
+        help="Print a manifest's fields in human-readable form",
+    )
+    km_show.add_argument("--manifest", required=True,
+                         help="Path to manifest JSON file.")
+
     args = parser.parse_args()
 
     if args.command == "scan":
@@ -279,6 +450,15 @@ def main():
         cmd_stats(args)
     elif args.command == "compliance-report":
         cmd_compliance_report(args)
+    elif args.command == "key-manifest":
+        if args.km_action == "generate":
+            cmd_key_manifest_generate(args)
+        elif args.km_action == "verify":
+            cmd_key_manifest_verify(args)
+        elif args.km_action == "show":
+            cmd_key_manifest_show(args)
+        else:
+            km_parser.print_help()
     else:
         parser.print_help()
 
