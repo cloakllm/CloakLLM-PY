@@ -898,6 +898,14 @@ class Shield:
         """v0.8.1 KM-3: emit a key_registered audit event binding the
         signing key to a KeyManifest.
 
+        v0.8.2 fail-hard hardening: if the deployer explicitly opted in to
+        KeyManifest (by setting deployer_id) but the Ed25519 backend is
+        not installed, raise RuntimeError NOW instead of silently
+        swallowing the ImportError and skipping the event. Silent
+        degradation here undermines the entire externally-verifiable
+        value proposition -- the deployer thinks they're emitting
+        key_registered events but they aren't.
+
         Allow-duplicate emission policy (Decision 3 in PLAN_v081.md): two
         Shield processes starting concurrently with the same key both emit
         identical key_registered events. Verifier dedups by manifest_hash.
@@ -908,13 +916,39 @@ class Shield:
           - an attestation key is configured (key_path, kms provider, or explicit)
           - config.deployer_id is set
         """
-        from cloakllm.attestation import derive_key_manifest
+        from cloakllm.attestation import (
+            derive_key_manifest, _ed25519_backend_available,
+            _ED25519_BACKEND_MISSING_MSG,
+        )
+
+        keypair = self._attestation_key
+        if keypair is None:
+            return  # No signing key -> nothing to bind a manifest to.
+
+        # v0.8.2 fail-hard: detect backend-missing case BEFORE entering
+        # the try/except. The deployer set deployer_id explicitly; failing
+        # silently here means key_registered events never make it to the
+        # chain and the auditor can't verify provenance later.
+        #
+        # KMS-backed keys (DeploymentKeyPair via KeyProvider) don't need
+        # local pynacl/cryptography because signing happens server-side --
+        # detect that case by checking for a `sign` callable that doesn't
+        # route through the local Ed25519 backend.
+        is_kms_keypair = (
+            self.config.attestation_key_provider is not None
+            and not isinstance(keypair, DeploymentKeyPair)
+        )
+        if not is_kms_keypair and not _ed25519_backend_available():
+            raise RuntimeError(
+                "Shield.__init__ failed to emit key_registered event: "
+                + _ED25519_BACKEND_MISSING_MSG
+                + " (Triggered by ShieldConfig.deployer_id being set; "
+                "without a backend the key_registered event cannot be "
+                "signed and auditors cannot externally verify your audit "
+                "chain. To disable KeyManifest emission, unset deployer_id.)"
+            )
 
         try:
-            keypair = self._attestation_key
-            if keypair is None:
-                return  # No signing key -> nothing to bind a manifest to.
-
             # Build the manifest using the keypair's own metadata (key_id /
             # public_key) plus the deployer's identity from config. The
             # callback hook for offline root signing is NOT exercised here
@@ -931,7 +965,8 @@ class Shield:
                 key_manifest=manifest.to_dict(),
             )
         except Exception as e:
-            # Non-fatal -- key_registered is observability + attestation
+            # Non-fatal for unexpected errors (filesystem, audit write, etc.)
+            # -- key_registered is observability + attestation
             # provenance, not a correctness invariant for sanitize/desanitize.
             import logging as _logging
             _logging.getLogger("cloakllm.shield").warning(

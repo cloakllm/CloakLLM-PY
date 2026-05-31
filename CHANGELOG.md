@@ -5,6 +5,28 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-05-31
+
+**Headline: "don't surprise the deployer."** Closes the v0.8.1 KeyManifest install-experience gap: bare `pip install cloakllm` doesn't pull an Ed25519 backend, and v0.8.1 silently swallowed the resulting `ImportError` at `Shield.__init__` -- the deployer thought they were emitting `key_registered` events but they weren't. v0.8.2 makes this **fail-hard with a clear, actionable error**.
+
+Drop-in safe from v0.8.1 for callers who don't set `deployer_id` (the pre-v0.8.1 baseline). Behavior change for v0.8.1 callers who set `deployer_id` without installing the Ed25519 backend: they now get an explicit `RuntimeError` at `Shield.__init__` pointing at `pip install cloakllm[attestation]`, instead of silently skipping every `key_registered` event.
+
+### Changed
+
+- **`Shield.__init__` fail-hard** when `deployer_id` is set + no Ed25519 backend installed. Raises `RuntimeError` with a clear extras-install hint instead of silently catching the underlying `ImportError`. KMS-backed deployments (where signing happens server-side) are detected and exempt from the local-backend check. Pre-v0.8.1 callers (no `deployer_id`) are completely unaffected.
+- **Error message in `DeploymentKeyPair.generate()` / `.sign()`** rewritten to point at `pip install cloakllm[attestation]` as the recommended path (still mentions raw `pip install pynacl` / `cryptography` for SO-answer compatibility). Single canonical constant `_ED25519_BACKEND_MISSING_MSG` reused at all three sites for consistency.
+- **New helper `_ed25519_backend_available()`** in `attestation.py` for cheap pre-flight checks at the Shield boundary.
+
+### Tests
+
+- 748 -> 755 tests (+7): new `TestKeyManifestBackendMissing` (4 tests) covers the fail-hard path, error-message actionability + ASCII-safety, pre-v0.8.1 callers unaffected when backend missing, and the edge case of attestation_key set + deployer_id unset (no emit, no error). `TestEd25519BackendMissingMsg` (3 tests) covers the lower-layer error constant + ImportError message + helper function.
+
+### Compatibility
+
+- **Behavior change scope:** v0.8.1 callers who set `deployer_id` without an Ed25519 backend installed will now see a `RuntimeError` at `Shield.__init__` instead of silent degradation. This is the correct audience -- they explicitly opted into KeyManifest and were getting nothing.
+- Pre-v0.8.1 callers (no `deployer_id`): zero behavior change.
+- All v0.6.x / v0.7.x / v0.8.x audit chains verify under v0.8.2 unchanged.
+
 ## [0.8.1] - 2026-05-31
 
 **Headline: KeyManifest -- externally-verifiable key provenance.** v0.8.0 lets your compliance officer generate Article 12 audit reports. v0.8.1 lets the EU AI Office's auditor verify those reports without trusting CloakLLM, your deployer, or anyone else's word about which keys are real. The audit chain stands on its own.

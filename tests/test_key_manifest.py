@@ -505,3 +505,124 @@ class TestBackwardCompatibility:
         )
         # The old API still works
         assert cert.verify(kp.public_key) is True
+
+
+# ===================================================================
+# v0.8.2: fail-hard when KeyManifest opt-in + no Ed25519 backend
+# ===================================================================
+#
+# The v0.8.1 behavior was fail-soft: Shield.__init__ would silently log a
+# warning and skip the key_registered event when no Ed25519 backend was
+# installed. This undermined the externally-verifiable value prop -- the
+# deployer thinks they're emitting events but they aren't. v0.8.2 makes
+# this fail-hard with a clear RuntimeError pointing at the extras group.
+# Pre-v0.8.1 callers (no deployer_id) are unaffected.
+
+class TestKeyManifestBackendMissing:
+    """v0.8.2: fail-hard at Shield.__init__ when KeyManifest opt-in
+    (deployer_id set) but Ed25519 backend missing."""
+
+    def _patch_backend_missing(self, monkeypatch):
+        """Simulate both pynacl AND cryptography being absent."""
+        import cloakllm.attestation as att
+        monkeypatch.setattr(att, "_HAS_NACL", False)
+        monkeypatch.setattr(att, "_HAS_CRYPTOGRAPHY", False)
+
+    def test_fail_hard_when_deployer_id_set_and_backend_missing(
+        self, tmp_path, monkeypatch
+    ):
+        """The fail-hard case: deployer_id set + no backend -> RuntimeError
+        at Shield.__init__ with extras hint in message."""
+        kp = DeploymentKeyPair.generate()
+        # NOTE: kp must be generated BEFORE patching backend to missing,
+        # otherwise the keypair itself can't be made. Patching only affects
+        # Shield's runtime backend-detection check.
+        self._patch_backend_missing(monkeypatch)
+        with pytest.raises(RuntimeError, match="cloakllm\\[attestation\\]"):
+            Shield(config=ShieldConfig(
+                audit_enabled=True, log_dir=str(tmp_path),
+                attestation_key=kp, deployer_id="acme",
+                key_valid_from="2026-01-01T00:00:00+00:00",
+            ))
+
+    def test_error_message_is_actionable(self, tmp_path, monkeypatch):
+        """Error message must include the extras-install hint and explain
+        WHY (deployer_id triggered the emission)."""
+        kp = DeploymentKeyPair.generate()
+        self._patch_backend_missing(monkeypatch)
+        with pytest.raises(RuntimeError) as exc:
+            Shield(config=ShieldConfig(
+                audit_enabled=True, log_dir=str(tmp_path),
+                attestation_key=kp, deployer_id="acme",
+            ))
+        msg = str(exc.value)
+        # Headline
+        assert "Shield.__init__ failed to emit key_registered" in msg
+        # Actionable hint
+        assert "cloakllm[attestation]" in msg
+        # Why it fired
+        assert "deployer_id" in msg
+        # ASCII-only (Windows console class -- v0.7.0 lesson)
+        assert all(ord(c) < 128 for c in msg), (
+            f"non-ASCII in error: {[c for c in msg if ord(c) >= 128]}"
+        )
+
+    def test_pre_v081_callers_unaffected_when_backend_missing(
+        self, tmp_path, monkeypatch
+    ):
+        """Pre-v0.8.1 callers don't set deployer_id, so they NEVER hit the
+        fail-hard path even when backend is missing. Critical back-compat
+        invariant."""
+        self._patch_backend_missing(monkeypatch)
+        # No attestation_key, no deployer_id -- baseline v0.6.x flow.
+        shield = Shield(config=ShieldConfig(
+            audit_enabled=True, log_dir=str(tmp_path),
+        ))
+        # Sanitize works fine; nothing about KeyManifest is exercised.
+        sanitized, _ = shield.sanitize("email alice@example.com")
+        assert "[EMAIL_0]" in sanitized
+
+    def test_no_emit_when_deployer_id_unset_even_with_attestation_key(
+        self, tmp_path, monkeypatch
+    ):
+        """Edge case: attestation_key set, deployer_id NOT set. The user
+        wants attestation (cert signing) but not KeyManifest. Pre-v0.8.1
+        behavior: Shield.__init__ does not call _emit_key_registered.
+        Backend can be missing too -- no event = no error."""
+        kp = DeploymentKeyPair.generate()
+        self._patch_backend_missing(monkeypatch)
+        # attestation_key set, deployer_id absent -> no KeyManifest path.
+        # Init must NOT raise.
+        Shield(config=ShieldConfig(
+            audit_enabled=True, log_dir=str(tmp_path),
+            attestation_key=kp,  # but no deployer_id
+        ))
+
+
+class TestEd25519BackendMissingMsg:
+    """v0.8.2: the constant error message at the lowest layer."""
+
+    def test_constant_points_at_extras(self):
+        from cloakllm.attestation import _ED25519_BACKEND_MISSING_MSG
+        assert "cloakllm[attestation]" in _ED25519_BACKEND_MISSING_MSG
+        # Backward-compat: also mentions raw alternatives so old docs/SO
+        # answers still work.
+        assert "pynacl" in _ED25519_BACKEND_MISSING_MSG
+        assert "cryptography" in _ED25519_BACKEND_MISSING_MSG
+        # ASCII only
+        assert all(ord(c) < 128 for c in _ED25519_BACKEND_MISSING_MSG)
+
+    def test_ed25519_backend_available_helper(self):
+        from cloakllm.attestation import _ed25519_backend_available
+        # In the dev env at least one backend is installed
+        assert _ed25519_backend_available() is True
+
+    def test_sign_uses_actionable_error(self, monkeypatch):
+        """DeploymentKeyPair.sign() with no backend -> ImportError with
+        cloakllm[attestation] hint, not the old raw 'pip install pynacl' line."""
+        import cloakllm.attestation as att
+        kp = DeploymentKeyPair.generate()
+        monkeypatch.setattr(att, "_HAS_NACL", False)
+        monkeypatch.setattr(att, "_HAS_CRYPTOGRAPHY", False)
+        with pytest.raises(ImportError, match="cloakllm\\[attestation\\]"):
+            kp.sign(b"data")
