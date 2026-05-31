@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cloakllm"
-version = "0.7.1"
+version = "0.8.0"
 description = "AI Compliance Middleware — PII protection, tamper-evident audit logs, and EU AI Act compliance for LLM gateways"
 readme = "README.md"
 license = {text = "MIT"}
@@ -37,6 +37,9 @@ litellm = [
     "python-dotenv>=1.2.2",
 ]
 attestation = ["pynacl>=1.5.0,<2.0.0"]
+# v0.8.0 CR8-4: PDF compliance reports via reportlab. Optional extra so the
+# core install stays lean; PDF is regulator-facing tooling, not core SDK.
+reporting = ["reportlab>=4.0,<5.0"]
 kms = [
     "boto3>=1.28,<2.0.0",
     "google-cloud-kms>=2.20,<4.0.0",

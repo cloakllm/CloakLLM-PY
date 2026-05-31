@@ -780,6 +780,108 @@ class Shield:
         """Get aggregate audit statistics."""
         return self.audit.get_stats()
 
+    def generate_compliance_report(
+        self,
+        period_from: Optional[str] = None,
+        period_to: Optional[str] = None,
+        articles: Optional[list[str]] = None,
+        format: str = "json",
+        out_path: Optional[str] = None,
+        include_decisions: bool = False,
+    ) -> Any:
+        """v0.8.0 CR8-1: produce a structured regulatory-output compliance
+        report from this Shield's audit log.
+
+        The report conforms to `examples/compliance_report_schema.json`. It
+        aggregates evidence per EU AI Act article, computes per-decision_id
+        rollups (optional), summarises certificate attestation, and emits a
+        COMPLIANT / NON_COMPLIANT verdict with explicit reasons.
+
+        Args:
+            period_from: ISO 8601 UTC start (inclusive). None = unbounded.
+            period_to: ISO 8601 UTC end (inclusive). None = unbounded.
+            articles: optional whitelist (e.g. ["EU_AI_Act_Art_12",
+                "EU_AI_Act_Art_4a"]). None = all articles found in the chain.
+            format: "json" (returns dict), "markdown" (returns str), "pdf"
+                (writes to out_path, requires `pip install cloakllm[reporting]`).
+            out_path: when set, the report is also written to this path.
+                Required for format="pdf".
+            include_decisions: when True, the report includes a per-decision_id
+                rollup (potentially large on high-volume chains).
+
+        Returns:
+            * format="json": the report dict (also writes to out_path if set)
+            * format="markdown": the rendered Markdown string
+            * format="pdf": the resolved out_path (file is written; nothing returned)
+
+        Raises:
+            ValueError: format unknown, or pdf format without out_path
+            RuntimeError: pdf format requested but `reportlab` not installed
+        """
+        from cloakllm import __version__
+        from cloakllm.compliance_report import (
+            ReportPeriod, build_report,
+        )
+
+        if format not in ("json", "markdown", "pdf"):
+            raise ValueError(
+                f"Unknown report format {format!r}. Expected "
+                f"'json' | 'markdown' | 'pdf'."
+            )
+
+        # Load entries from this Shield's audit log directory. The audit
+        # logger has been verified already; we just need raw entries here.
+        entries = []
+        log_dir = Path(self.config.log_dir)
+        if log_dir.exists():
+            for fp in sorted(log_dir.glob("audit_*.jsonl")):
+                with open(fp, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entries.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue  # mirrors verify_chain's tolerance
+
+        report = build_report(
+            audit_entries=entries,
+            period=ReportPeriod(from_ts=period_from, to_ts=period_to),
+            articles=articles,
+            cloakllm_version=__version__,
+            audit_dir=str(log_dir),
+            include_decisions=include_decisions,
+        )
+
+        # Render + optional write
+        if format == "json":
+            if out_path:
+                Path(out_path).write_text(
+                    json.dumps(report, indent=2) + "\n", encoding="utf-8",
+                )
+            return report
+
+        if format == "markdown":
+            from cloakllm.compliance_report import render_markdown
+            md = render_markdown(report)
+            if out_path:
+                Path(out_path).write_text(md, encoding="utf-8")
+            return md
+
+        # format == "pdf"
+        if not out_path:
+            raise ValueError("format='pdf' requires out_path.")
+        try:
+            from cloakllm.compliance_report import render_pdf
+        except ImportError as e:
+            raise RuntimeError(
+                "PDF output requires reportlab. Install with: "
+                "pip install cloakllm[reporting]"
+            ) from e
+        render_pdf(report, out_path)
+        return out_path
+
     def _log_key_rotation_event(self) -> None:
         """
         Log a key_rotation_event audit entry. Contains no PII — only
@@ -870,6 +972,13 @@ class Shield:
                 "entity_hashing": cfg.entity_hashing,
                 "attestation_enabled": attestation_enabled,
                 "retention_hint_days": cfg.retention_hint_days,
+                # v0.8.0 CR8-9: v0.7.1 compliance-schema extensions
+                "decision_id_enabled": True,  # always-on since v0.7.1
+                "system_version_pin_configured": bool(
+                    cfg.deployment_version and cfg.instruction_version
+                ),
+                # v0.8.0 headline: compliance-reporting API availability
+                "compliance_reporting_available": True,
             },
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "cloakllm_version": __version__,

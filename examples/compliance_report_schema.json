@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloakllm.dev/schemas/compliance_report/v1.0.json",
+  "title": "CloakLLM Compliance Report",
+  "description": "Structured regulatory-output schema produced by Shield.generate_compliance_report() (v0.8.0+). Designed to be auditor-consumable without CloakLLM-specific knowledge. Per-entry attestation block is shape-compatible with v0.8.1 ProvenanceReport (manifest-derived fields default to null until v0.8.1 KeyManifest ships).",
+  "type": "object",
+  "required": [
+    "report_metadata",
+    "period",
+    "chain_integrity",
+    "per_article",
+    "verdict"
+  ],
+  "properties": {
+    "report_metadata": {
+      "type": "object",
+      "required": ["generated_at", "cloakllm_version", "schema_version"],
+      "properties": {
+        "generated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 UTC timestamp of when this report was produced."
+        },
+        "cloakllm_version": {
+          "type": "string",
+          "description": "CloakLLM version that produced this report."
+        },
+        "schema_version": {
+          "const": "1.0",
+          "description": "Compliance-report schema version. Bumped on backward-incompatible changes."
+        },
+        "audit_dir": {
+          "type": "string",
+          "description": "Audit log directory the report was generated from."
+        }
+      }
+    },
+    "period": {
+      "type": "object",
+      "required": ["from", "to"],
+      "properties": {
+        "from": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Earliest timestamp in scope. Null if no entries in range."
+        },
+        "to": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Latest timestamp in scope. Null if no entries in range."
+        }
+      }
+    },
+    "articles_in_scope": {
+      "type": ["array", "null"],
+      "items": {"type": "string"},
+      "description": "List of EU AI Act / GDPR articles the report aggregates over. Null = all articles found in the chain."
+    },
+    "chain_integrity": {
+      "type": "object",
+      "required": ["verdict", "total_entries"],
+      "properties": {
+        "verdict": {
+          "enum": ["verified", "broken"],
+          "description": "Whether the SHA-256 hash chain links across all in-scope entries verify."
+        },
+        "total_entries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "anomalies": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Human-readable descriptions of any chain breaks or schema violations."
+        }
+      }
+    },
+    "per_article": {
+      "type": "object",
+      "description": "Per-EU-AI-Act-article rollup. Keys are article identifiers (e.g. 'EU_AI_Act_Art_12', 'EU_AI_Act_Art_4a').",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["evidence_event_count"],
+        "properties": {
+          "evidence_event_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of audit entries claiming this article in their article_ref."
+          },
+          "decision_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of distinct decision_ids touching this article."
+          },
+          "categories_detected": {
+            "type": "object",
+            "additionalProperties": {"type": "integer"},
+            "description": "PII categories aggregated across all in-scope events for this article."
+          },
+          "pii_in_log": {
+            "type": "boolean",
+            "description": "Always false in compliance mode. true => COMPLIANCE VIOLATION."
+          },
+          "bias_sessions": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Article 4a only: count of bias_session_start events."
+          },
+          "wipe_confirmed_pct": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Article 4a only: percentage of bias_session_end events with wipe_confirmed=true."
+          },
+          "findings_recorded": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Article 4a only: count of bias_finding events."
+          }
+        }
+      }
+    },
+    "decisions": {
+      "type": "object",
+      "description": "Optional per-decision rollup keyed by decision_id. Only emitted when include_decisions=true (default false; large reports otherwise).",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["entry_count", "articles_touched"],
+        "properties": {
+          "entry_count": {"type": "integer", "minimum": 1},
+          "articles_touched": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "categories": {
+            "type": "object",
+            "additionalProperties": {"type": "integer"}
+          },
+          "first_timestamp": {"type": "string", "format": "date-time"},
+          "last_timestamp": {"type": "string", "format": "date-time"}
+        }
+      }
+    },
+    "attestation": {
+      "type": "object",
+      "description": "Aggregate attestation status across all in-scope entries. v0.8.0 reports signature checks only; v0.8.1+ adds KeyManifest-based provenance verification.",
+      "required": ["entries_with_certificates", "schema_version"],
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "description": "Attestation block schema version. '1.0' = signature-only (v0.8.0); '1.1' = + KeyManifest (v0.8.1+)."
+        },
+        "entries_with_certificates": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "signatures_valid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "key_ids": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "provenance_summary": {
+          "type": "object",
+          "description": "v0.8.1-forward-compat slot. v0.8.0 emits null-filled placeholders. v0.8.1 KeyManifest fills these.",
+          "properties": {
+            "manifests_found": {"type": ["integer", "null"]},
+            "manifests_valid": {"type": ["integer", "null"]},
+            "within_validity_window_pct": {"type": ["number", "null"]},
+            "root_signature_status_distribution": {
+              "type": ["object", "null"],
+              "additionalProperties": {"type": "integer"}
+            }
+          }
+        }
+      }
+    },
+    "verdict": {
+      "enum": ["COMPLIANT", "NON_COMPLIANT"],
+      "description": "Overall report verdict. COMPLIANT iff chain_integrity.verdict='verified' AND no per_article entry has pii_in_log=true AND signatures_valid == entries_with_certificates (when attestation enabled)."
+    },
+    "verdict_reasons": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Empty when COMPLIANT. Lists each reason when NON_COMPLIANT."
+    }
+  }
+}

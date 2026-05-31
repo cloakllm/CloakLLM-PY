@@ -1,0 +1,194 @@
+{
+  "report_metadata": {
+    "generated_at": "2026-05-31T09:17:34.081942+00:00",
+    "cloakllm_version": "0.7.1",
+    "schema_version": "1.0",
+    "audit_dir": "audit"
+  },
+  "period": {
+    "from": "2020-01-01T00:00:00+00:00",
+    "to": "2026-05-31T09:17:34.063392+00:00"
+  },
+  "articles_in_scope": null,
+  "chain_integrity": {
+    "verdict": "verified",
+    "total_entries": 25,
+    "anomalies": []
+  },
+  "per_article": {
+    "EU_AI_Act_Art_12": {
+      "evidence_event_count": 25,
+      "decision_count": 10,
+      "categories_detected": {
+        "EMAIL": 20,
+        "ETHNICITY": 1,
+        "RACE": 1,
+        "RELIGION": 1,
+        "PERSON": 2
+      },
+      "pii_in_log": false
+    },
+    "EU_AI_Act_Art_19": {
+      "evidence_event_count": 25,
+      "decision_count": 10,
+      "categories_detected": {
+        "EMAIL": 20,
+        "ETHNICITY": 1,
+        "RACE": 1,
+        "RELIGION": 1,
+        "PERSON": 2
+      },
+      "pii_in_log": false
+    },
+    "EU_AI_Act_Art_4a": {
+      "evidence_event_count": 5,
+      "decision_count": 0,
+      "categories_detected": {
+        "ETHNICITY": 1,
+        "RACE": 1,
+        "RELIGION": 1
+      },
+      "pii_in_log": false,
+      "bias_sessions": 1,
+      "findings_recorded": 1,
+      "wipe_confirmed_pct": 100.0
+    }
+  },
+  "attestation": {
+    "schema_version": "1.0",
+    "entries_with_certificates": 0,
+    "signatures_valid": 0,
+    "key_ids": [],
+    "provenance_summary": {
+      "manifests_found": null,
+      "manifests_valid": null,
+      "within_validity_window_pct": null,
+      "root_signature_status_distribution": null
+    }
+  },
+  "verdict": "COMPLIANT",
+  "verdict_reasons": [],
+  "decisions": {
+    "01KSYN61XHBMQCZC5267XH8AVX": {
+      "entry_count": 2,
+      "articles_touched": [
+        "EU_AI_Act_Art_12",
+        "EU_AI_Act_Art_19"
+      ],
+      "categories": {
+        "EMAIL": 2
+      },
+      "first_timestamp": "2026-05-31T09:17:34.002959+00:00",
+      "last_timestamp": "2026-05-31T09:17:34.005034+00:00"
+    },
+    "01KSYN61XVCD3KV7GCY2B42PNM": {
+      "entry_count": 2,
+      "articles_touched": [
+        "EU_AI_Act_Art_12",
+        "EU_AI_Act_Art_19"
+      ],
+      "categories": {
+        "EMAIL": 2
+      },
+      "first_timestamp": "2026-05-31T09:17:34.011320+00:00",
+      "last_timestamp": "2026-05-31T09:17:34.011952+00:00"
+    },
+    "01KSYN61Y0S1MFD98K8S526FJ9": {
+      "entry_count": 2,
+      "articles_touched": [
+        "EU_AI_Act_Art_12",
+        "EU_AI_Act_Art_19"
+      ],
+      "categories": {
+        "EMAIL": 2
+      },
+      "first_timestamp": "2026-05-31T09:17:34.016360+00:00",
+      "last_timestamp": "2026-05-31T09:17:34.016922+00:00"
+    },
+    "01KSYN61Y83XTJ4A961MTNPSJ7": {
+      "entry_count": 2,
+      "articles_touched": [
+        "EU_AI_Act_Art_12",
+        "EU_AI_Act_Art_19"
+      ],
+      "categories": {
+        "EMAIL": 2
+      },
+      "first_timestamp": "2026-05-31T09:17:34.024646+00:00",
+      "last_timestamp": "2026-05-31T09:17:34.025305+00:00"
+    },
+    "01KSYN61YDDTDS4CFSFTFEXXR0": {
+      "entry_count": 2,
+      "articles_touched": [
+        "EU_AI_Act_Art_12",
+        "EU_AI_Act_Art_19"
+      ],
+      "categories": {
+        "EMAIL": 2
+      },
+      "first_timestamp": "2026-05-31T09:17:34.029682+00:00",
+      "last_timestamp": "2026-05-31T09:17:34.030241+00:00"
+    },
+    "01KSYN61YQ70FDSH5BVTC09N3T": {
+      "entry_count": 2,
+      "articles_touched": [
+        "EU_AI_Act_Art_12",
+        "EU_AI_Act_Art_19"
+      ],
+      "categories": {
+        "EMAIL": 2
+      },
+      "first_timestamp": "2026-05-31T09:17:34.039984+00:00",
+      "last_timestamp": "2026-05-31T09:17:34.040768+00:00"
+    },
+    "01KSYN61YX1DE42CX8TXHB7K09": {
+      "entry_count": 2,
+      "articles_touched": [
+        "EU_AI_Act_Art_12",
+        "EU_AI_Act_Art_19"
+      ],
+      "categories": {
+        "EMAIL": 2
+      },
+      "first_timestamp": "2026-05-31T09:17:34.045218+00:00",
+      "last_timestamp": "2026-05-31T09:17:34.045774+00:00"
+    },
+    "01KSYN61Z2RSDEWTWQZF6KVKS7": {
+      "entry_count": 2,
+      "articles_touched": [
+        "EU_AI_Act_Art_12",
+        "EU_AI_Act_Art_19"
+      ],
+      "categories": {
+        "EMAIL": 2
+      },
+      "first_timestamp": "2026-05-31T09:17:34.050116+00:00",
+      "last_timestamp": "2026-05-31T09:17:34.050710+00:00"
+    },
+    "01KSYN61Z9Q1AN7Z771HP1V1NJ": {
+      "entry_count": 2,
+      "articles_touched": [
+        "EU_AI_Act_Art_12",
+        "EU_AI_Act_Art_19"
+      ],
+      "categories": {
+        "EMAIL": 2
+      },
+      "first_timestamp": "2026-05-31T09:17:34.057618+00:00",
+      "last_timestamp": "2026-05-31T09:17:34.058305+00:00"
+    },
+    "01KSYN61ZEX129DK11HEAXAD28": {
+      "entry_count": 2,
+      "articles_touched": [
+        "EU_AI_Act_Art_12",
+        "EU_AI_Act_Art_19"
+      ],
+      "categories": {
+        "EMAIL": 2,
+        "PERSON": 2
+      },
+      "first_timestamp": "2026-05-31T09:17:34.062765+00:00",
+      "last_timestamp": "2026-05-31T09:17:34.063392+00:00"
+    }
+  }
+}
