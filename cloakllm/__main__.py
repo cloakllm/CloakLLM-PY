@@ -134,6 +134,67 @@ def cmd_stats(args):
     print(json.dumps(stats, indent=2))
 
 
+def cmd_compliance_report(args):
+    """v0.8.0 CR8-6: Generate a regulatory-output compliance report.
+
+    Exit codes: 0 = COMPLIANT, 1 = NON_COMPLIANT (CI-friendly so deployers
+    can gate releases on `cloakllm compliance-report ...`).
+    """
+    from cloakllm import Shield, ShieldConfig
+
+    _warn_if_outside_cwd(args.log_dir)
+    log_dir = Path(args.log_dir)
+    # audit_enabled=False -- the CLI doesn't write entries; it only reads.
+    config = ShieldConfig(log_dir=log_dir, audit_enabled=False)
+    shield = Shield(config=config)
+
+    articles = args.articles.split(",") if args.articles else None
+    result = shield.generate_compliance_report(
+        period_from=args.from_ts,
+        period_to=args.to_ts,
+        articles=articles,
+        format=args.format,
+        out_path=args.out,
+        include_decisions=args.include_decisions,
+    )
+
+    # Pretty-print the JSON to stdout when no out file requested AND format=json
+    if args.format == "json" and not args.out:
+        print(json.dumps(result, indent=2))
+    elif args.format == "markdown" and not args.out:
+        # Print to stdout
+        print(result, end="")
+    elif args.out:
+        # All formats write to file; tell the user where it landed
+        print(f"[OK] Wrote {args.format} compliance report to {args.out}")
+
+    # Verdict exit code (the JSON dict has 'verdict'; markdown/pdf return the
+    # rendered output, not a dict, so we need to compute verdict separately for
+    # those formats by re-running in json mode -- cheap because the audit
+    # entries are tiny in memory).
+    if args.format in ("markdown", "pdf"):
+        verdict_check = shield.generate_compliance_report(
+            period_from=args.from_ts,
+            period_to=args.to_ts,
+            articles=articles,
+            format="json",
+        )
+        verdict = verdict_check["verdict"]
+    else:
+        verdict = result["verdict"]
+
+    if verdict != "COMPLIANT":
+        # Print reasons to stderr so CI logs show why
+        if args.format in ("markdown", "pdf"):
+            reasons = verdict_check.get("verdict_reasons", [])
+        else:
+            reasons = result.get("verdict_reasons", [])
+        print(f"[FAIL] Verdict: NON_COMPLIANT", file=sys.stderr)
+        for r in reasons:
+            print(f"  * {r}", file=sys.stderr)
+        sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="cloakllm",
@@ -174,6 +235,40 @@ def main():
     stats_parser = subparsers.add_parser("stats", help="Show audit statistics")
     stats_parser.add_argument("log_dir", help="Path to audit log directory")
 
+    # compliance-report (v0.8.0 CR8-6)
+    cr_parser = subparsers.add_parser(
+        "compliance-report",
+        help="Generate a regulatory-output compliance report from the audit log",
+    )
+    cr_parser.add_argument(
+        "log_dir", help="Path to audit log directory",
+    )
+    cr_parser.add_argument(
+        "--from", dest="from_ts", default=None,
+        help="Period start (ISO 8601 UTC). Default: unbounded.",
+    )
+    cr_parser.add_argument(
+        "--to", dest="to_ts", default=None,
+        help="Period end (ISO 8601 UTC). Default: unbounded.",
+    )
+    cr_parser.add_argument(
+        "--articles", default=None,
+        help="Comma-separated article filter (e.g. EU_AI_Act_Art_12,EU_AI_Act_Art_4a). Default: all.",
+    )
+    cr_parser.add_argument(
+        "--format", choices=["json", "markdown", "pdf"], default="json",
+        help="Output format. PDF requires `pip install cloakllm[reporting]`.",
+    )
+    cr_parser.add_argument(
+        "--out", default=None,
+        help="Output file path. Required for --format=pdf. Otherwise prints to stdout.",
+    )
+    cr_parser.add_argument(
+        "--include-decisions", action="store_true", default=False,
+        dest="include_decisions",
+        help="Include per-decision_id rollup (large on high-volume chains).",
+    )
+
     args = parser.parse_args()
 
     if args.command == "scan":
@@ -182,6 +277,8 @@ def main():
         cmd_verify(args)
     elif args.command == "stats":
         cmd_stats(args)
+    elif args.command == "compliance-report":
+        cmd_compliance_report(args)
     else:
         parser.print_help()
 

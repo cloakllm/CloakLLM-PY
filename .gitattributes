@@ -1,0 +1,2 @@
+# v0.8.0: ensure binary sample artifacts are never line-ending-normalized.
+*.pdf binary

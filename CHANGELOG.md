@@ -5,6 +5,37 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-05-31
+
+**Headline: `Shield.generate_compliance_report()` -- end-to-end EU AI Act audit reports.** v0.6.0 shipped Article 12 Compliance Mode. v0.7.0 added Article 4a bias-detection. v0.7.1 added `decision_id` and `system_version_pin`. v0.8.0 turns those into a regulator-facing report: one call reduces the audit chain to a per-article rollup (Article 12 evidence event count, Article 4a bias sessions with `wipe_confirmed` rate, Article 19 hash-chain verdict), reconciles cross-article events via `decision_id`, and prints a COMPLIANT / NON_COMPLIANT verdict with human-readable reasons. Output in JSON (canonical structured contract), Markdown (human-readable narrative for DPO/compliance officer), or PDF (regulator-ready, via optional `[reporting]` extras dependency on `reportlab>=4.0`).
+
+Drop-in safe from v0.7.1. All v0.7.x audit chains verify under v0.8.0.
+
+### Added
+
+- **`Shield.generate_compliance_report()`** -- new API. Reads the audit chain from the configured `log_dir`, aggregates per-article (Article 12 / Article 19 / Article 4a / GDPR Articles 5+25), computes verdict, returns a structured report dict or rendered Markdown / PDF. Optional `period_from` / `period_to` (ISO 8601 UTC, inclusive), optional `articles` whitelist, optional `include_decisions=True` for per-`decision_id` rollup. New `cloakllm.compliance_report` module with pure-function `build_report()` engine (testable without an `AuditLogger`).
+- **JSON Schema 2020-12 contract** for the report output -- `examples/compliance_report_schema.json`. Stable shape across SDKs.
+- **Sample regulator-facing reports** in `examples/compliance_report_sample.{json,md,pdf}`. Generated from a synthetic 30-entry audit chain covering plain sanitize + Article 4a bias session with finding. Use as starting points for DPO templates.
+- **`cloakllm compliance-report` CLI** -- `cloakllm compliance-report <log_dir> --from ... --to ... --format json|markdown|pdf --out ... --include-decisions`. Exit code `0` on COMPLIANT, `1` on NON_COMPLIANT (CI-friendly).
+- **`compliance_summary()` v0.8.0 fields** (CR8-9) -- `config_snapshot` now surfaces `decision_id_enabled` (always `True` since v0.7.1), `system_version_pin_configured` (`True` iff both `deployment_version` and `instruction_version` are set), and `compliance_reporting_available` (`True`). Auditors no longer need to inspect the audit chain to confirm the post-v0.7.1 capability set is active.
+- **v0.8.1 KeyManifest forward-compat shape** (CR8-5) -- the report's `attestation` block emits a `provenance_summary` slot with `manifests_found` / `manifests_valid` / `within_validity_window_pct` / `root_signature_status_distribution` set to `null` in v0.8.0. v0.8.1 will fill these in without a schema bump.
+
+### Changed
+
+- **`reportlab>=4.0,<5.0` is a new optional extras dependency**, installed via `pip install cloakllm[reporting]`. Required only for `format='pdf'`. JSON and Markdown work with no extra deps. `ImportError` surfaces as a clear `RuntimeError` with the install hint when missing.
+
+### Tests
+
+- 679 -> 710 tests (+31): `tests/test_compliance_report.py` covers per-article rollup (5 tests including the **bias-stats-only-on-Art_4a correctness invariant**), `decision_id` reconciliation (3), schema contract (3), verdict (3), Markdown (2), PDF (2 -- skipped if reportlab absent), unknown format (1), attestation forward-compat (1), `compliance_summary` v0.8.0 fields (3), **AUDIT-3 adversarial-input hardening** (4 -- malformed entries / NUL-byte / string article_ref / include_decisions safety, defends `build_report` against producers writing corrupt JSONL), plus edge cases.
+
+### Security
+
+- **AUDIT-3 hardening**: `build_report()` now coerces non-list `article_ref` to `[]` and skips non-string `timestamp` from sortable comparisons. Pre-fix, a hand-crafted audit entry with `timestamp=42` or `article_ref="EU_AI_Act_Art_12"` (string instead of list) would crash the reducer with `TypeError` or silently corrupt per-article counts. Cross-SDK parity preserved (same hardening in JS).
+
+### Compatibility
+
+- All v0.6.x / v0.7.x audit chains verify under v0.8.0. New report-output schema is additive only.
+
 ## [0.7.1] - 2026-05-19
 
 Cleanup + compliance-schema extension release. Six items: two new optional AuditEntry fields (`decision_id`, `system_version_pin`) that align with canonical_log_event v0.2; three deferred-from-v0.7.0 cleanup items (JS IPv6 normalizer, `legacy_canonical` sunset phase 1, `Shield.analyze()` default flip); one doc-only mapping section in `COMPLIANCE.md`. Drop-in safe from v0.7.0. All v0.7.0 audit chains verify under v0.7.1.
