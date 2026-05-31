@@ -47,6 +47,22 @@ except ImportError:
     _HAS_CRYPTOGRAPHY = False
 
 
+# v0.8.2: single canonical error message pointing at the extras group
+# (the recommended path) rather than raw pynacl/cryptography pip lines.
+# ASCII-only to defend the Windows console crash class (v0.7.0 lesson).
+_ED25519_BACKEND_MISSING_MSG = (
+    "Ed25519 backend required. CloakLLM uses Ed25519 for attestation "
+    "(signing certificates, KeyManifest, etc.) but no backend is installed. "
+    "Install via the extras group:  pip install cloakllm[attestation]  "
+    "(equivalent: pip install pynacl  OR  pip install cryptography)."
+)
+
+
+def _ed25519_backend_available() -> bool:
+    """v0.8.2: cheap check for the fail-hard guard at Shield.__init__."""
+    return _HAS_NACL or _HAS_CRYPTOGRAPHY
+
+
 # --- Canonical JSON (must match JS exactly) ---
 # Delegated to cloakllm._canonical for cross-SDK byte-equivalence (v0.6.1+).
 # Pre-v0.6.1 this used `ensure_ascii=True`, which broke verification of any
@@ -84,10 +100,7 @@ class DeploymentKeyPair:
                 serialization.PublicFormat.Raw,
             )
         else:
-            raise ImportError(
-                "Ed25519 requires pynacl or cryptography: "
-                "pip install pynacl  # or: pip install cryptography"
-            )
+            raise ImportError(_ED25519_BACKEND_MISSING_MSG)
         key_id = hashlib.sha256(public_key).hexdigest()[:16]
         return cls(private_key=private_key, public_key=public_key, key_id=key_id)
 
@@ -97,7 +110,7 @@ class DeploymentKeyPair:
             return SigningKey(self.private_key).sign(data).signature
         elif _HAS_CRYPTOGRAPHY:
             return Ed25519PrivateKey.from_private_bytes(self.private_key).sign(data)
-        raise ImportError("No Ed25519 library available")
+        raise ImportError(_ED25519_BACKEND_MISSING_MSG)
 
     def sign_b64(self, data: bytes) -> str:
         """Sign data and return base64-encoded signature."""
