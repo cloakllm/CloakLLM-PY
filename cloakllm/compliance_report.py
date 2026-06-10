@@ -97,6 +97,12 @@ def _empty_attestation() -> dict:
             "manifests_valid": None,
             "within_validity_window_pct": None,
             "root_signature_status_distribution": None,
+            # v0.9.0 RV-4 (additive): revocation rollup. false/null when no
+            # revocation list was supplied to the report -- pre-v0.9.0
+            # behavior unchanged apart from these three new keys.
+            "revocation_checked": False,
+            "revoked_keys_found": None,
+            "certs_after_revocation": None,
         },
     }
 
@@ -234,15 +240,68 @@ def _fill_provenance_summary(
     if isinstance(pct, float) and pct == int(pct):
         pct = int(pct)
 
-    attestation["provenance_summary"] = {
+    # v0.9.0: UPDATE (not replace) so the RV-4 revocation keys -- and any
+    # future additive keys -- survive this fill. The replace-style
+    # assignment here was the v0.9.0 RV-4 integration bug class.
+    attestation["provenance_summary"].update({
         "manifests_found": len(manifests_by_key_id),
         "manifests_valid": manifests_valid,
         "within_validity_window_pct": pct,
         "root_signature_status_distribution": root_distribution,
-    }
+    })
 
 
 # --- Core builder ---
+
+
+def _fill_revocation_summary(
+    *,
+    audit_entries_replay: list,
+    period: "ReportPeriod",
+    attestation: dict,
+    revocation_list,
+) -> None:
+    """v0.9.0 RV-4: fill the revocation rollup in provenance_summary.
+
+    When revocation_list is None, the three fields keep their defaults
+    (false/null/null) -- pre-v0.9.0 report behavior. When supplied:
+
+      revocation_checked       -- True
+      revoked_keys_found       -- of the key_ids used by certified entries
+                                  in the period, how many are revoked
+      certs_after_revocation   -- certified entries signed at or after
+                                  their key's revoked_at (the bad ones)
+
+    The list's integrity (list_hash, root signature) is verified by
+    verify_key_provenance at the per-cert layer and by the CLI; the
+    aggregator here trusts its caller passed a list it already vetted --
+    Shield.generate_compliance_report loads + parses, and a tampered list
+    surfaces as LIST_INVALID in per-cert checks downstream.
+    """
+    if revocation_list is None:
+        return
+
+    revoked_keys_seen: set = set()
+    certs_after = 0
+    for entry in audit_entries_replay:
+        if not entry.get("certificate_hash"):
+            continue
+        if not _in_period(entry.get("timestamp"), period):
+            continue
+        kid = entry.get("key_id")
+        if not isinstance(kid, str) or not kid:
+            continue
+        rev_entry = revocation_list.find_entry(kid)
+        if rev_entry is None:
+            continue
+        revoked_keys_seen.add(kid)
+        ts = entry.get("timestamp")
+        if isinstance(ts, str) and ts >= rev_entry.revoked_at:
+            certs_after += 1
+
+    attestation["provenance_summary"]["revocation_checked"] = True
+    attestation["provenance_summary"]["revoked_keys_found"] = len(revoked_keys_seen)
+    attestation["provenance_summary"]["certs_after_revocation"] = certs_after
 
 
 def build_report(
@@ -253,6 +312,7 @@ def build_report(
     cloakllm_version: str,
     audit_dir: Optional[str] = None,
     include_decisions: bool = False,
+    revocation_list=None,
 ) -> dict:
     """Build a compliance report from an iterable of audit entries.
 
@@ -486,6 +546,14 @@ def build_report(
         audit_entries_replay=audit_entries_buffered,
         period=period,
         attestation=attestation,
+    )
+
+    # v0.9.0 RV-4: fill revocation rollup when a list was supplied.
+    _fill_revocation_summary(
+        audit_entries_replay=audit_entries_buffered,
+        period=period,
+        attestation=attestation,
+        revocation_list=revocation_list,
     )
 
     report: dict[str, Any] = {

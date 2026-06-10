@@ -94,20 +94,17 @@ def cmd_verify(args):
     logger = AuditLogger(config)
 
     output_format = getattr(args, "format", None)
-    legacy = getattr(args, "legacy_canonical_json", False)
+    # v0.9.0 LC-1: --legacy-canonical-json flag removed (sunset completed).
 
     if output_format == "compliance_report":
-        report = logger.verify_chain(
-            output_format="compliance_report",
-            legacy_canonical=legacy,
-        )
+        report = logger.verify_chain(output_format="compliance_report")
         print(json.dumps(report, indent=2))
         if report["verdict"] != "COMPLIANT":
             sys.exit(1)
         return
 
     print(f"Verifying audit chain in {log_dir}...")
-    is_valid, errors, final_seq = logger.verify_chain(legacy_canonical=legacy)
+    is_valid, errors, final_seq = logger.verify_chain()
 
     # v0.7.0 AUDIT-11: ASCII-only output. Em-dash + emoji crash CLI output on
     # Windows non-UTF-8 console codepages (cp1255 Hebrew, cp932 Japanese, etc.).
@@ -270,7 +267,18 @@ def cmd_key_manifest_verify(args):
                   "(base64) or 'public_key_hex'", file=sys.stderr)
             sys.exit(1)
 
-    report = verify_key_provenance(cert, manifest, root_public_key=root_pk_bytes)
+    # v0.9.0 RV-5: optional revocation list -> check #6.
+    revocation_list = None
+    if getattr(args, "revocation_list", None):
+        from cloakllm.attestation import RevocationList
+        rl_data = json.loads(Path(args.revocation_list).read_text(encoding="utf-8"))
+        revocation_list = RevocationList.from_dict(rl_data)
+
+    report = verify_key_provenance(
+        cert, manifest,
+        root_public_key=root_pk_bytes,
+        revocation_list=revocation_list,
+    )
 
     if args.format == "json":
         print(json.dumps(report.to_dict(), indent=2))
@@ -282,6 +290,7 @@ def cmd_key_manifest_verify(args):
         print(f"      key_id_matches:           {report.key_id_matches}")
         print(f"      within_validity_window:   {report.within_validity_window}")
         print(f"      root_signature_status:    {report.root_signature_status}")
+        print(f"      revocation_status:        {report.revocation_status}")
         print(f"      manifest_hash_consistent: {report.manifest_hash_consistent}")
         if report.notes:
             print(f"      notes:")
@@ -290,6 +299,74 @@ def cmd_key_manifest_verify(args):
 
     if not report.overall_valid:
         sys.exit(1)
+
+
+def cmd_key_manifest_revoke(args):
+    """v0.9.0 RV-5: the offline revocation ceremony.
+
+    Appends one entry to the deployer's RevocationList (or creates a new
+    list) and re-signs with the offline root key. Entries are never
+    removed -- revocation is permanent; rotate to a new key instead.
+
+    Exit 0 on success.
+    """
+    from cloakllm.attestation import (
+        DeploymentKeyPair, RevocationList, derive_revocation_list,
+    )
+
+    existing_entries = []
+    if args.existing_list:
+        prior = RevocationList.from_dict(
+            json.loads(Path(args.existing_list).read_text(encoding="utf-8"))
+        )
+        if prior.deployer_id != args.deployer_id:
+            print(f"[FAIL] existing list deployer_id ({prior.deployer_id}) "
+                  f"does not match --deployer-id ({args.deployer_id})",
+                  file=sys.stderr)
+            sys.exit(1)
+        existing_entries = [e.to_dict() for e in prior.entries]
+        if any(e["key_id"] == args.key_id for e in existing_entries):
+            print(f"[FAIL] key_id {args.key_id} is already revoked in "
+                  f"{args.existing_list}. Revocation is permanent.",
+                  file=sys.stderr)
+            sys.exit(1)
+
+    from datetime import datetime, timezone
+    revoked_at = args.revoked_at or datetime.now(timezone.utc).isoformat()
+
+    root_signing_callback = None
+    if args.root_key:
+        if not args.root_key_id:
+            print("[FAIL] --root-key-id is required when --root-key is supplied",
+                  file=sys.stderr)
+            sys.exit(1)
+        root_kp = DeploymentKeyPair.from_file(args.root_key)
+        root_signing_callback = root_kp.sign
+
+    new_list = derive_revocation_list(
+        deployer_id=args.deployer_id,
+        entries=existing_entries + [{
+            "key_id": args.key_id,
+            "revoked_at": revoked_at,
+            "reason": args.reason,
+        }],
+        root_signing_callback=root_signing_callback,
+        root_key_id=args.root_key_id,
+    )
+    out_path = Path(args.out)
+    if out_path.parent and not out_path.parent.exists():
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps(new_list.to_dict(), indent=2) + "\n", encoding="utf-8"
+    )
+    print(f"[OK] Wrote RevocationList to {out_path}")
+    print(f"     revoked: {args.key_id} at {revoked_at} (reason: {args.reason})")
+    print(f"     total entries: {len(new_list.entries)}")
+    if new_list.root_signature:
+        print(f"     root-signed by {new_list.root_key_id}")
+    else:
+        print("     WARNING: unsigned list -- not the security boundary. "
+              "Re-run with --root-key for production.")
 
 
 def cmd_key_manifest_show(args):
@@ -334,17 +411,10 @@ def main():
         default=None,
         help="Output format. 'compliance_report' returns a structured EU AI Act Article 12 report (JSON).",
     )
-    verify_parser.add_argument(
-        "--legacy-canonical-json",
-        action="store_true",
-        default=False,
-        dest="legacy_canonical_json",
-        help=(
-            "Use the v0.6.0 canonical JSON encoding (ensure_ascii=True) when "
-            "verifying. Required for audit chains written by CloakLLM <= 0.6.0 "
-            "that contain non-ASCII characters. Sunset in v0.7.0."
-        ),
-    )
+    # v0.9.0 LC-1: --legacy-canonical-json flag REMOVED (sunset phase 2,
+    # per the v0.7.1 phase-1 commitment). Pre-v0.6.1 chains must be
+    # re-archived under a v0.6.1..v0.8.x release. argparse now rejects
+    # the flag with its standard unrecognized-arguments error.
 
     # stats
     stats_parser = subparsers.add_parser("stats", help="Show audit statistics")
@@ -429,6 +499,9 @@ def main():
                         help="OPTIONAL path to root public key (32-byte raw, "
                              "base64-encoded in a JSON file with field 'public_key'). "
                              "Required to verify the manifest's root_signature.")
+    km_ver.add_argument("--revocation-list", default=None,
+                        help="OPTIONAL path to the deployer's RevocationList JSON "
+                             "(v0.9.0). Adds check #6: REVOKED certs fail.")
     km_ver.add_argument("--format", choices=["json", "text"], default="text",
                         help="Output format.")
 
@@ -439,6 +512,32 @@ def main():
     )
     km_show.add_argument("--manifest", required=True,
                          help="Path to manifest JSON file.")
+
+    # revoke (v0.9.0 RV-5) -- the offline revocation ceremony
+    km_rev = km_sub.add_parser(
+        "revoke",
+        help="Add a key to the deployer's RevocationList (offline root ceremony)",
+    )
+    km_rev.add_argument("--key-id", required=True,
+                        help="The key_id to revoke.")
+    km_rev.add_argument("--reason", required=True,
+                        choices=["compromised", "superseded", "ceased_operation", "unspecified"],
+                        help="Revocation reason.")
+    km_rev.add_argument("--revoked-at", default=None,
+                        help="ISO 8601 UTC. Default: now. Certs signed at or "
+                             "after this moment become untrusted.")
+    km_rev.add_argument("--deployer-id", required=True,
+                        help="Deployer identifier (must match the KeyManifests).")
+    km_rev.add_argument("--list", dest="existing_list", default=None,
+                        help="Path to the EXISTING revocation list to append to. "
+                             "Omit to create a new list.")
+    km_rev.add_argument("--root-key", default=None,
+                        help="Path to the offline root key file (recommended -- "
+                             "an unsigned list is not the security boundary).")
+    km_rev.add_argument("--root-key-id", default=None,
+                        help="Root key identifier (required iff --root-key set).")
+    km_rev.add_argument("--out", required=True,
+                        help="Output path for the new revocation list JSON.")
 
     args = parser.parse_args()
 
@@ -457,6 +556,8 @@ def main():
             cmd_key_manifest_verify(args)
         elif args.km_action == "show":
             cmd_key_manifest_show(args)
+        elif args.km_action == "revoke":
+            cmd_key_manifest_revoke(args)
         else:
             km_parser.print_help()
     else:

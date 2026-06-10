@@ -104,6 +104,17 @@ class Shield:
         ):
             self._log_key_rotation_event()
 
+        # v0.9.0 RV-3 (Open Q3 locked): fail-hard when this Shield's OWN
+        # signing key appears in the configured revocation list. Signing
+        # with a revoked key is always a mistake -- the v0.8.2 "don't
+        # surprise the deployer" doctrine. Runs BEFORE key_registered
+        # emission so a revoked key never gets re-registered either.
+        if (
+            self._attestation_key is not None
+            and self.config.revocation_list_path
+        ):
+            self._check_own_key_not_revoked()
+
         # v0.8.1 KM-3: emit a key_registered event once on init when the
         # deployer has set deployer_id (the trigger for the externally-
         # verifiable provenance flow). Allow-duplicate emission: concurrent
@@ -754,19 +765,12 @@ class Shield:
                 {"valid": bool, "errors": list[str], "final_seq": int} dict.
                 When "compliance_report", returns a structured EU AI Act
                 Article 12 compliance report dict.
-            legacy_canonical: When True, use the v0.6.0-compatible canonical
-                JSON encoding to verify pre-v0.6.1 audit chains containing
-                non-ASCII data. Sunset in v0.7.0.
-
-                **Cross-SDK limitation (v0.6.3 I3):** The legacy_canonical
-                flag restores the v0.6.0 hashing behavior PER-SDK. Python
-                v0.6.0 escaped non-ASCII characters (e.g. `é` → `\\u00e9`);
-                JavaScript v0.6.0 preserved UTF-8. A Python v0.6.0 audit chain
-                containing non-ASCII data in `categories`, `metadata`, or
-                `entity_details` CANNOT be re-verified by the JS verifier with
-                `legacyCanonical: true`, and vice versa. There is no migration
-                path for those specific cross-SDK chains. Same-SDK chains
-                (Python verified by Python, JS by JS) are unaffected.
+            legacy_canonical: REMOVED in v0.9.0 (LC-1 phase 2). The kwarg
+                remains in the signature for one more cycle so operators
+                get an actionable ValueError (raised by verify_chain)
+                instead of a bare TypeError. Hard-deleted in v1.0.
+                Pre-v0.6.1 chains must be re-archived under a
+                v0.6.1..v0.8.x release.
 
         Returns:
             Default dict shape, or compliance report dict when requested.
@@ -800,6 +804,7 @@ class Shield:
         format: str = "json",
         out_path: Optional[str] = None,
         include_decisions: bool = False,
+        revocation_list_path: Optional[str] = None,
     ) -> Any:
         """v0.8.0 CR8-1: produce a structured regulatory-output compliance
         report from this Shield's audit log.
@@ -857,6 +862,25 @@ class Shield:
                         except json.JSONDecodeError:
                             continue  # mirrors verify_chain's tolerance
 
+        # v0.9.0 RV-4: load the revocation list. Explicit arg wins; falls
+        # back to config.revocation_list_path. None -> revocation fields
+        # keep their false/null defaults (pre-v0.9.0 behavior).
+        revocation_list = None
+        rl_path = revocation_list_path or self.config.revocation_list_path
+        if rl_path:
+            from cloakllm.attestation import RevocationList
+            try:
+                rl_data = json.loads(
+                    Path(rl_path).read_text(encoding="utf-8")
+                )
+                revocation_list = RevocationList.from_dict(rl_data)
+            except Exception as e:
+                raise RuntimeError(
+                    f"generate_compliance_report: revocation list at "
+                    f"{rl_path} could not be loaded "
+                    f"({type(e).__name__}: {e})."
+                ) from e
+
         report = build_report(
             audit_entries=entries,
             period=ReportPeriod(from_ts=period_from, to_ts=period_to),
@@ -864,6 +888,7 @@ class Shield:
             cloakllm_version=__version__,
             audit_dir=str(log_dir),
             include_decisions=include_decisions,
+            revocation_list=revocation_list,
         )
 
         # Render + optional write
@@ -893,6 +918,91 @@ class Shield:
             ) from e
         render_pdf(report, out_path)
         return out_path
+
+    def _check_own_key_not_revoked(self) -> None:
+        """v0.9.0 RV-3 (Open Q3): raise RuntimeError if this Shield's own
+        signing key appears in the configured revocation list with a
+        revoked_at at or before now.
+
+        Defensive on the list itself: an unreadable or tampered list raises
+        too (a deployer who CONFIGURED revocation checking must not run
+        blind when the check can't actually run -- same doctrine as the
+        v0.8.2 Ed25519-backend fail-hard).
+        """
+        import json as _json
+        from cloakllm.attestation import RevocationList
+
+        key_id = getattr(self._attestation_key, "key_id", None)
+        if not key_id:
+            return  # KMS providers without a local key_id surface: skip.
+
+        path = Path(self.config.revocation_list_path)
+        try:
+            data = _json.loads(path.read_text(encoding="utf-8"))
+            rl = RevocationList.from_dict(data)
+        except Exception as e:
+            raise RuntimeError(
+                f"Shield.__init__: revocation_list_path is set but the list "
+                f"at {path} could not be loaded ({type(e).__name__}: {e}). "
+                "Fix or unset CLOAKLLM_REVOCATION_LIST / "
+                "ShieldConfig.revocation_list_path."
+            ) from e
+
+        entry = rl.find_entry(key_id)
+        if entry is not None:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            if entry.revoked_at <= now_iso:
+                raise RuntimeError(
+                    f"Shield.__init__: this Shield's signing key "
+                    f"({key_id}) was REVOKED at {entry.revoked_at} "
+                    f"(reason: {entry.reason}) per the revocation list at "
+                    f"{path}. Signing with a revoked key is always a "
+                    "mistake. Generate a new keypair, publish a new "
+                    "KeyManifest, and update the deployment."
+                )
+
+    def record_key_revocation(
+        self,
+        key_id: str,
+        reason: str,
+        revoked_at: Optional[str] = None,
+    ) -> None:
+        """v0.9.0 RV-3: write an ADVISORY key_revoked event to the audit
+        chain.
+
+        This is the honest-deployer convenience record -- timeline
+        visibility in compliance reports. It is explicitly NOT the
+        security boundary: a compromised runtime would simply not call
+        this. The boundary is the root-signed out-of-band RevocationList
+        (see PLAN_v090.md Design Decision 1 / COMPLIANCE.md).
+
+        Args:
+            key_id: the revoked key's id (1..64 chars).
+            reason: one of compromised | superseded | ceased_operation |
+                unspecified (same whitelist as RevocationList entries).
+            revoked_at: ISO 8601 UTC. Default: now.
+        """
+        from cloakllm.attestation import (
+            _REVOCATION_REASON_WHITELIST, _validate_iso8601_utc,
+        )
+        if not isinstance(key_id, str) or not key_id or len(key_id) > 64:
+            raise ValueError("key_id must be a non-empty string <= 64 chars")
+        if reason not in _REVOCATION_REASON_WHITELIST:
+            raise ValueError(
+                f"reason must be one of {sorted(_REVOCATION_REASON_WHITELIST)}"
+            )
+        if revoked_at is None:
+            revoked_at = datetime.now(timezone.utc).isoformat()
+        _validate_iso8601_utc(revoked_at, "revoked_at")
+        self.audit.log(
+            event_type="key_revoked",
+            key_id=key_id,
+            metadata={
+                "revoked_at": revoked_at,
+                "reason": reason,
+                "advisory": True,  # NOT the security boundary
+            },
+        )
 
     def _emit_key_registered_event(self) -> None:
         """v0.8.1 KM-3: emit a key_registered audit event binding the

@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from cloakllm._canonical import canonical_json, _legacy_canonical_json
+from cloakllm._canonical import canonical_json
 from cloakllm.config import ShieldConfig
 
 
@@ -717,18 +717,14 @@ class AuditLogger:
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
     @staticmethod
-    def _compute_hash(data: dict, *, legacy_canonical: bool = False) -> str:
-        """
-        Compute SHA-256 hash of entry data.
+    def _compute_hash(data: dict) -> str:
+        """Compute SHA-256 hash of entry data via canonical JSON.
 
-        Args:
-            data: The audit-entry dict to hash.
-            legacy_canonical: When True, use the v0.6.0-compatible canonicalizer
-                (ensure_ascii=True). Used ONLY by verify_chain when the caller
-                opts in to verifying a pre-v0.6.1 chain. Sunset in v0.7.0.
+        v0.9.0 LC-1: the legacy_canonical encoder branch was removed
+        (v0.7.1 sunset phase 1 -> v0.9.0 phase 2). One canonicalizer,
+        one hash semantics, cross-SDK byte-equivalent since v0.6.1.
         """
-        encoder = _legacy_canonical_json if legacy_canonical else canonical_json
-        canonical = encoder(data)
+        canonical = canonical_json(data)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def log(
@@ -855,30 +851,26 @@ class AuditLogger:
                 (is_valid, errors, final_seq) tuple -- backward compatible.
                 When "compliance_report", returns a structured dict with
                 period, totals, category aggregates, and verdict.
-            legacy_canonical: When True, recompute hashes using the v0.6.0
-                canonicalizer (`ensure_ascii=True`). Use this to verify audit
-                chains written by CloakLLM v0.5.x or v0.6.0 that contain
-                non-ASCII characters. SCHEDULED FOR REMOVAL IN v0.9.0
-                (extended from v0.7.0 / v0.8.0 to give operators with
-                archival v0.5.x/v0.6.0 chains time to migrate).
+            legacy_canonical: REMOVED in v0.9.0 (LC-1 phase 2, per the
+                v0.7.1 sunset commitment). The kwarg remains in the
+                signature for one more cycle so operators get an
+                actionable error instead of a bare TypeError; passing
+                True raises ValueError. Hard-deleted in v1.0.
 
         Returns (is_valid, errors, final_seq) by default, or a dict
         when output_format="compliance_report".
         """
         if legacy_canonical:
-            # v0.7.1 C7.1-4 (phase 1): emit DeprecationWarning on EVERY call,
-            # not just on first import. Phase 2 (v0.9.0) removes the flag
-            # entirely. The warning is intentionally noisy at v0.7.1+ so any
-            # operator still using legacy_canonical sees the message in CI /
-            # production logs and has time to migrate.
-            import warnings as _w
-            _w.warn(
-                "legacy_canonical=True is a backward-compat shim for v0.5.x / "
-                "v0.6.0 audit chains. SCHEDULED FOR REMOVAL IN v0.9.0. If you "
-                "still have archival chains from those versions, re-verify "
-                "and re-archive them before upgrading to v0.9.0.",
-                DeprecationWarning,
-                stacklevel=2,
+            # v0.9.0 LC-1 phase 2: the v0.7.1 DeprecationWarning promised
+            # removal in v0.9.0. Raise (don't vanish) -- a bare TypeError
+            # would strand exactly the operator who most needs guidance.
+            raise ValueError(
+                "legacy_canonical was removed in v0.9.0. Pre-v0.6.1 audit "
+                "chains (v0.5.x / v0.6.0 with non-ASCII content) must be "
+                "re-verified and re-archived under a v0.6.1..v0.8.x release "
+                "before upgrading. See CHANGELOG v0.7.1 (sunset phase 1) "
+                "and v0.9.0 (removal). The kwarg itself will be deleted "
+                "in v1.0."
             )
         errors: list[str] = []
         final_seq = 0
@@ -972,9 +964,9 @@ class AuditLogger:
                                 pii_categories_detected.get(cat, 0) + count
                             )
 
-                    # Recompute entry hash (legacy_canonical thread-through)
+                    # Recompute entry hash (single canonicalizer since v0.9.0 LC-1)
                     stored_hash = entry.pop("entry_hash", "")
-                    recomputed = self._compute_hash(entry, legacy_canonical=legacy_canonical)
+                    recomputed = self._compute_hash(entry)
                     # v0.6.4 G8: timing-safe comparison. The byte-by-byte != on
                     # hex strings short-circuits at the first mismatching byte --
                     # an attacker with many verify_chain calls and microsecond

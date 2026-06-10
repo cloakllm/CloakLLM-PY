@@ -263,42 +263,38 @@ class TestSystemVersionPin:
 
 
 # ---------------------------------------------------------------------------
-# C7.1-4: legacy_canonical sunset (phase 1)
+# C7.1-4: legacy_canonical sunset -- UPDATED to phase 2 (v0.9.0 LC-1).
+# Phase 1 (v0.7.1) emitted a DeprecationWarning per call; phase 2 raises
+# an actionable ValueError. The kwarg itself hard-deletes in v1.0.
 # ---------------------------------------------------------------------------
 
 
 class TestLegacyCanonicalSunset:
-    def test_legacy_canonical_emits_deprecation_warning(self, shield_a12):
-        # Generate a chain
+    def test_legacy_canonical_true_raises_value_error(self, shield_a12):
         shield_a12.sanitize("hello")
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with pytest.raises(ValueError, match="removed in v0.9.0"):
             shield_a12.verify_audit(legacy_canonical=True)
-        deprecations = [x for x in w if issubclass(x.category, DeprecationWarning)]
-        assert len(deprecations) >= 1
-        msg = str(deprecations[0].message)
-        assert "legacy_canonical" in msg
-        assert "v0.9.0" in msg
 
-    def test_legacy_canonical_emits_warning_every_call(self, shield_a12):
-        # Phase 1 of the sunset means EVERY call warns, not just first.
+    def test_error_message_is_actionable_and_ascii(self, shield_a12):
         shield_a12.sanitize("hello")
-        for _ in range(3):
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                shield_a12.verify_audit(legacy_canonical=True)
-            deps = [x for x in w if issubclass(x.category, DeprecationWarning)]
-            assert len(deps) >= 1, "every call should emit at least one DeprecationWarning"
+        with pytest.raises(ValueError) as exc:
+            shield_a12.verify_audit(legacy_canonical=True)
+        msg = str(exc.value)
+        # Tells the operator WHAT to do, not just that it's gone.
+        assert "re-archived" in msg or "re-archive" in msg
+        assert "v0.6.1" in msg
+        # ASCII-only (Windows console class -- v0.7.0 lesson)
+        assert all(ord(c) < 128 for c in msg)
 
-    def test_legacy_canonical_no_warning_when_false(self, shield_a12):
+    def test_legacy_canonical_false_still_works(self, shield_a12):
         shield_a12.sanitize("hello")
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            shield_a12.verify_audit(legacy_canonical=False)
-        deprecations = [x for x in w
-                        if issubclass(x.category, DeprecationWarning)
-                        and "legacy_canonical" in str(x.message)]
-        assert len(deprecations) == 0
+        result = shield_a12.verify_audit(legacy_canonical=False)
+        assert result["valid"] is True
+
+    def test_default_unchanged(self, shield_a12):
+        shield_a12.sanitize("hello")
+        result = shield_a12.verify_audit()
+        assert result["valid"] is True
 
 
 # ---------------------------------------------------------------------------

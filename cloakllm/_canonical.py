@@ -12,10 +12,11 @@ Properties:
 - allow_nan=False — NaN/Infinity rejected (incompatible with strict JSON anyway)
 - Object keys MUST be strings (rejects integer keys)
 
-Backward-compat: `_legacy_canonical_json` preserves the v0.6.0 behavior
-(`ensure_ascii=True`) so that audit chains written by older versions can still
-be verified via the `legacy_canonical=True` flag on `verify_audit` / `verify_chain`.
-That flag is sunset in v0.7.0.
+History: `_legacy_canonical_json` (the v0.6.0 `ensure_ascii=True` variant)
+was REMOVED in v0.9.0 (LC-1 phase 2), completing the sunset announced in
+v0.7.1 phase 1. Pre-v0.6.1 chains with non-ASCII content must be
+re-archived under a v0.6.1..v0.8.x release. One canonicalizer, one hash
+semantics.
 """
 
 from __future__ import annotations
@@ -41,11 +42,3 @@ def canonical_json(obj: Any) -> str:
         ensure_ascii=False,
         allow_nan=False,
     )
-
-
-def _legacy_canonical_json(obj: Any) -> str:
-    """
-    v0.6.0-compatible canonical JSON. Used ONLY by `legacy_canonical=True`
-    verification paths to validate older audit chains. Sunset in v0.7.0.
-    """
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"))
