@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from cloakllm._canonical import canonical_json, _legacy_canonical_json
+from cloakllm._canonical import canonical_json
 
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "canonical_corpus.json"
@@ -52,15 +52,10 @@ def test_canonical_json_non_ascii_preserved_not_escaped():
     assert "\\u" not in out  # should NOT have unicode escapes
 
 
-def test_legacy_canonical_json_preserves_v060_behavior():
-    """The legacy shim MUST escape non-ASCII (the v0.6.0 bug we're fixing)."""
-    out = _legacy_canonical_json({"x": "café"})
-    assert "\\u00e9" in out  # legacy escapes
-
-
-def test_legacy_canonical_json_byte_identical_to_v060_format():
-    """Verify the legacy shim output exactly matches what v0.6.0 produced."""
-    # Format: sort_keys=True, separators=(",", ":"), ensure_ascii=True (default)
-    expected = '{"a":1,"b":"caf\\u00e9"}'
-    actual = _legacy_canonical_json({"b": "café", "a": 1})
-    assert actual == expected
+# v0.9.0 LC-1: the _legacy_canonical_json shim was removed (sunset phase 2).
+# Its two preservation tests went with it. The removal itself is defended
+# in tests/test_v090_lc1.py (raise-with-message + module no longer exports).
+def test_legacy_canonical_json_removed():
+    """v0.9.0 LC-1: the shim must NOT exist anymore."""
+    import cloakllm._canonical as can
+    assert not hasattr(can, "_legacy_canonical_json")

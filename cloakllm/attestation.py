@@ -717,6 +717,13 @@ PROVENANCE_VERIFIED = "VERIFIED"
 PROVENANCE_FAILED = "FAILED"
 PROVENANCE_UNVERIFIED = "UNVERIFIED"  # back-compat: manifest=None
 
+# v0.9.0 RV-2: revocation status values (cross-SDK enum)
+REVOCATION_NOT_REVOKED = "NOT_REVOKED"
+REVOCATION_REVOKED = "REVOKED"
+REVOCATION_REVOKED_BUT_CERT_PREDATES = "REVOKED_BUT_CERT_PREDATES"
+REVOCATION_NOT_CHECKED = "NOT_CHECKED"   # no list supplied (back-compat default)
+REVOCATION_LIST_INVALID = "LIST_INVALID"  # bad list is worse than no list
+
 
 @dataclass(frozen=True)
 class ProvenanceReport:
@@ -734,6 +741,8 @@ class ProvenanceReport:
     manifest_hash_consistent: Optional[bool]      # None when manifest=None
     checked_at: str                               # ISO 8601 UTC
     notes: list[str]                              # Human-readable findings
+    # v0.9.0 RV-2 (additive; defaults preserve all pre-v0.9.0 call sites):
+    revocation_status: str = REVOCATION_NOT_CHECKED
 
     def to_dict(self) -> dict:
         return {
@@ -746,6 +755,7 @@ class ProvenanceReport:
             "manifest_hash_consistent": self.manifest_hash_consistent,
             "checked_at": self.checked_at,
             "notes": list(self.notes),
+            "revocation_status": self.revocation_status,
         }
 
 
@@ -764,6 +774,87 @@ def _parse_iso8601_safe(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _check_revocation(
+    certificate: "SanitizationCertificate",
+    manifest: Optional["KeyManifest"],
+    revocation_list: Optional["RevocationList"],
+    root_public_key: Optional[bytes],
+    notes: list,
+) -> str:
+    """v0.9.0 RV-2: compute the revocation_status for check #6.
+
+    Integrity-first: a tampered or mismatched list returns LIST_INVALID
+    (worse than no list -- the auditor must know their input is bad, not
+    silently treat it as 'nothing revoked').
+    """
+    if revocation_list is None:
+        return REVOCATION_NOT_CHECKED
+
+    # Integrity: recompute list_hash from fields.
+    expected = _compute_revocation_list_hash(
+        deployer_id=revocation_list.deployer_id,
+        entries=[e.to_dict() for e in revocation_list.entries],
+        issued_at=revocation_list.issued_at,
+        list_version=revocation_list.list_version,
+        root_key_id=revocation_list.root_key_id,
+    )
+    if expected != revocation_list.list_hash:
+        notes.append("revocation list_hash mismatch: list has been tampered with")
+        return REVOCATION_LIST_INVALID
+
+    # Deployer binding: the list must be for the same deployer as the
+    # manifest (when a manifest is present).
+    if manifest is not None and revocation_list.deployer_id != manifest.deployer_id:
+        notes.append(
+            f"revocation list deployer_id {revocation_list.deployer_id!r} does "
+            f"not match manifest deployer_id {manifest.deployer_id!r}"
+        )
+        return REVOCATION_LIST_INVALID
+
+    # Root signature on the list (when both sig and key are available).
+    if revocation_list.root_signature is not None and root_public_key is not None:
+        try:
+            sig = base64.b64decode(revocation_list.root_signature)
+            ok = DeploymentKeyPair.verify(
+                root_public_key,
+                revocation_list.list_hash.encode("ascii"),
+                sig,
+            )
+        except Exception as e:
+            notes.append(f"revocation list root_signature parse raised: {type(e).__name__}")
+            ok = False
+        if not ok:
+            notes.append("revocation list root_signature INVALID")
+            return REVOCATION_LIST_INVALID
+
+    entry = revocation_list.find_entry(certificate.key_id)
+    if entry is None:
+        return REVOCATION_NOT_REVOKED
+
+    cert_ts = _parse_iso8601_safe(certificate.timestamp)
+    revoked_ts = _parse_iso8601_safe(entry.revoked_at)
+    if cert_ts is None or revoked_ts is None:
+        # Conservative: unparseable timestamps on a listed key -> REVOKED.
+        notes.append(
+            f"key {entry.key_id} is revoked and timestamps are unparseable; "
+            "treating cert as post-revocation (conservative)"
+        )
+        return REVOCATION_REVOKED
+    if cert_ts >= revoked_ts:
+        notes.append(
+            f"key {entry.key_id} revoked at {entry.revoked_at} "
+            f"(reason: {entry.reason}); cert signed at {certificate.timestamp}"
+        )
+        return REVOCATION_REVOKED
+    # X.509/OCSP semantics: certs from before the compromise window stay
+    # valid. Note it so the auditor sees the timeline.
+    notes.append(
+        f"key {entry.key_id} was revoked at {entry.revoked_at} but this cert "
+        f"predates revocation ({certificate.timestamp}); cert remains valid"
+    )
+    return REVOCATION_REVOKED_BUT_CERT_PREDATES
+
+
 def verify_key_provenance(
     certificate: SanitizationCertificate,
     manifest: Optional[KeyManifest],
@@ -771,6 +862,7 @@ def verify_key_provenance(
     root_public_key: Optional[bytes] = None,
     now: Optional[str] = None,
     clock_skew_seconds: int = 0,
+    revocation_list: Optional["RevocationList"] = None,
 ) -> ProvenanceReport:
     """Verify a certificate's signature AND the key's provenance.
 
@@ -835,8 +927,15 @@ def verify_key_provenance(
     # --- Manifest-absent backward-compat short-circuit ---
     if manifest is None:
         notes.append("manifest=None: signature-only check (UNVERIFIED provenance)")
+        # v0.9.0 RV-2: the revocation check runs standalone against the
+        # cert's key_id even without a manifest -- a revoked key is a
+        # revoked key regardless of whether provenance can be verified.
+        revocation_status = _check_revocation(
+            certificate, None, revocation_list, root_public_key, notes
+        )
+        rev_ok = revocation_status not in (REVOCATION_REVOKED, REVOCATION_LIST_INVALID)
         return ProvenanceReport(
-            overall_valid=signature_valid,
+            overall_valid=signature_valid and rev_ok,
             provenance_status=PROVENANCE_UNVERIFIED,
             signature_valid=signature_valid,
             key_id_matches=None,
@@ -845,6 +944,7 @@ def verify_key_provenance(
             manifest_hash_consistent=None,
             checked_at=checked_at,
             notes=notes,
+            revocation_status=revocation_status,
         )
 
     # --- Check 2: key_id_matches ---
@@ -929,6 +1029,11 @@ def verify_key_provenance(
             root_signature_status = ROOT_SIG_INVALID
             notes.append(f"root_signature parse/verify raised: {type(e).__name__}: {e}")
 
+    # --- Check 6 (v0.9.0 RV-2): revocation ---
+    revocation_status = _check_revocation(
+        certificate, manifest, revocation_list, root_public_key, notes
+    )
+
     # --- Compute overall_valid ---
     required_checks = [
         signature_valid,
@@ -941,6 +1046,12 @@ def verify_key_provenance(
     # UNVERIFIED_NO_KEY do not fail overall_valid -- they're just status.
     if manifest.root_signature is not None and root_public_key is not None:
         required_checks.append(root_signature_status == ROOT_SIG_VALID)
+    # v0.9.0: REVOKED and LIST_INVALID fail; NOT_CHECKED / NOT_REVOKED /
+    # REVOKED_BUT_CERT_PREDATES do not (the last per X.509/OCSP semantics).
+    if revocation_list is not None:
+        required_checks.append(
+            revocation_status not in (REVOCATION_REVOKED, REVOCATION_LIST_INVALID)
+        )
     overall_valid = all(required_checks)
 
     return ProvenanceReport(
@@ -953,4 +1064,255 @@ def verify_key_provenance(
         manifest_hash_consistent=manifest_hash_consistent,
         checked_at=checked_at,
         notes=notes,
+        revocation_status=revocation_status,
+    )
+
+
+# ===================================================================
+# v0.9.0 RV-1: RevocationList -- root-signed key revocation
+# ===================================================================
+#
+# The v0.8.1 KeyManifest gap: valid_until covers planned rotation, but a
+# compromised key inside its validity window stays trusted until the
+# window closes. The RevocationList closes that gap.
+#
+# CRITICAL DESIGN PROPERTY (PLAN_v090.md Design Decision 1): the
+# revocation list is an OUT-OF-BAND artifact, NOT carried in the audit
+# chain. A compromised runtime controls the chain -- it will simply never
+# write a key_revoked event against its own stolen key. The list lives
+# outside the attacker's write path: published by the deployer, signed by
+# the SAME offline root key as the KeyManifest, handed to the auditor
+# out-of-band. Inline key_revoked audit events exist (RV-3) but only as
+# the honest-deployer convenience record -- explicitly NOT the security
+# boundary.
+#
+# Monotonic by convention: a new list supersedes the old by issued_at;
+# entries are never removed. Un-revoking is forbidden -- rotate to a new
+# key instead. An EMPTY root-signed list is valid and useful: "nothing
+# revoked as of <issued_at>" is a signed, dated claim rather than an
+# absence of data.
+
+REVOCATION_LIST_SCHEMA_VERSION = "1.0"
+_REVOCATION_REASON_WHITELIST = frozenset({
+    "compromised", "superseded", "ceased_operation", "unspecified",
+})
+_REVOCATION_MAX_ENTRIES = 4096  # log-volume DoS defense; far above real use
+
+
+@dataclass(frozen=True)
+class RevocationEntry:
+    """One revoked key. Certs signed at or after revoked_at are untrusted;
+    certs from before the compromise window stay valid (X.509/OCSP
+    semantics -- see REVOKED_BUT_CERT_PREDATES in verify_key_provenance)."""
+    key_id: str
+    revoked_at: str          # ISO 8601 UTC
+    reason: str              # one of _REVOCATION_REASON_WHITELIST
+
+    def to_dict(self) -> dict:
+        return {
+            "key_id": self.key_id,
+            "revoked_at": self.revoked_at,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class RevocationList:
+    """v0.9.0 root-signed revocation artifact.
+
+    Use `derive_revocation_list()` to construct; the factory enforces
+    field validation, computes the deterministic list_hash, and optionally
+    invokes the root-signing callback (same ceremony pattern as
+    KeyManifest -- the runtime never holds the root key).
+    """
+    deployer_id: str
+    entries: tuple            # tuple[RevocationEntry, ...]
+    issued_at: str            # ISO 8601 UTC -- freshness marker
+    list_version: str         # "1.0"
+    list_hash: str            # SHA-256 hex of canonical-JSON of fields above
+    root_signature: Optional[str] = None   # Ed25519 over list_hash
+    root_key_id: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "deployer_id": self.deployer_id,
+            "entries": [e.to_dict() for e in self.entries],
+            "issued_at": self.issued_at,
+            "list_version": self.list_version,
+            "list_hash": self.list_hash,
+            "root_signature": self.root_signature,
+            "root_key_id": self.root_key_id,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> RevocationList:
+        """Deserializer. Does NOT re-validate or recompute list_hash --
+        verification is verify_key_provenance's concern (LIST_INVALID)."""
+        if not isinstance(d, dict):
+            raise TypeError(
+                f"RevocationList.from_dict expects a dict, got {type(d).__name__}"
+            )
+        raw_entries = d.get("entries")
+        entries = []
+        if isinstance(raw_entries, list):
+            for item in raw_entries:
+                if isinstance(item, dict):
+                    entries.append(RevocationEntry(
+                        key_id=str(item.get("key_id", "")),
+                        revoked_at=str(item.get("revoked_at", "")),
+                        reason=str(item.get("reason", "")),
+                    ))
+        return cls(
+            deployer_id=str(d.get("deployer_id", "")),
+            entries=tuple(entries),
+            issued_at=str(d.get("issued_at", "")),
+            list_version=str(d.get("list_version", REVOCATION_LIST_SCHEMA_VERSION)),
+            list_hash=str(d.get("list_hash", "")),
+            root_signature=d.get("root_signature"),
+            root_key_id=d.get("root_key_id"),
+        )
+
+    def find_entry(self, key_id: str) -> Optional[RevocationEntry]:
+        """Return the revocation entry for key_id, or None. If a key was
+        (incorrectly) listed more than once, the EARLIEST revoked_at wins
+        -- the conservative reading for the auditor."""
+        found = None
+        for e in self.entries:
+            if e.key_id == key_id:
+                if found is None or e.revoked_at < found.revoked_at:
+                    found = e
+        return found
+
+
+def _compute_revocation_list_hash(
+    *,
+    deployer_id: str,
+    entries: list,
+    issued_at: str,
+    list_version: str,
+    root_key_id: Optional[str],
+) -> str:
+    """Deterministic SHA-256 of the canonical-JSON. Entry ORDER is part of
+    the hash (the ceremony appends; reordering is tampering). Cross-SDK
+    invariant: same inputs in Py and JS produce the same hash."""
+    payload = {
+        "deployer_id": deployer_id,
+        "entries": entries,  # list of {key_id, revoked_at, reason} dicts
+        "issued_at": issued_at,
+        "list_version": list_version,
+        "root_key_id": root_key_id,
+    }
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def derive_revocation_list(
+    *,
+    deployer_id: str,
+    entries: list,           # list[RevocationEntry] OR list[dict]
+    issued_at: Optional[str] = None,
+    root_signing_callback: Optional[Any] = None,
+    root_key_id: Optional[str] = None,
+) -> RevocationList:
+    """Produce a RevocationList for `deployer_id`.
+
+    The empty list is explicitly valid: a deployer publishes an empty
+    root-signed list at setup so "no revocations" is a signed, dated
+    claim. Same root-signing ceremony as derive_key_manifest -- the
+    callback receives list_hash bytes, returns a 64-byte Ed25519
+    signature; the runtime never holds the root key.
+
+    Raises ValueError on: empty/oversized/NUL deployer_id, unknown reason
+    code, malformed timestamps, duplicate key_id entries, > 4096 entries,
+    callback without root_key_id, bad signature length.
+    """
+    # --- deployer_id (same rules as KeyManifest) ---
+    if not isinstance(deployer_id, str) or not deployer_id:
+        raise ValueError("deployer_id must be a non-empty string")
+    if len(deployer_id) > _KEY_MANIFEST_DEPLOYER_ID_MAX:
+        raise ValueError(
+            f"deployer_id must be <= {_KEY_MANIFEST_DEPLOYER_ID_MAX} chars"
+        )
+    if "\x00" in deployer_id:
+        raise ValueError("deployer_id must not contain NUL bytes")
+
+    if issued_at is None:
+        issued_at = datetime.now(timezone.utc).isoformat()
+    _validate_iso8601_utc(issued_at, "issued_at")
+
+    # --- entries (AUDIT-3 hardening from day 1) ---
+    if not isinstance(entries, (list, tuple)):
+        raise ValueError(f"entries must be a list (got {type(entries).__name__})")
+    if len(entries) > _REVOCATION_MAX_ENTRIES:
+        raise ValueError(f"entries exceeds {_REVOCATION_MAX_ENTRIES} cap")
+    normalized: list[RevocationEntry] = []
+    seen_key_ids: set[str] = set()
+    for i, item in enumerate(entries):
+        if isinstance(item, RevocationEntry):
+            entry = item
+        elif isinstance(item, dict):
+            entry = RevocationEntry(
+                key_id=item.get("key_id"),       # type: ignore[arg-type]
+                revoked_at=item.get("revoked_at"),  # type: ignore[arg-type]
+                reason=item.get("reason"),       # type: ignore[arg-type]
+            )
+        else:
+            raise ValueError(
+                f"entries[{i}] must be RevocationEntry or dict "
+                f"(got {type(item).__name__})"
+            )
+        if not isinstance(entry.key_id, str) or not entry.key_id:
+            raise ValueError(f"entries[{i}].key_id must be a non-empty string")
+        if len(entry.key_id) > 64 or "\x00" in entry.key_id:
+            raise ValueError(f"entries[{i}].key_id invalid (cap 64, no NUL)")
+        if entry.key_id in seen_key_ids:
+            raise ValueError(
+                f"entries[{i}].key_id {entry.key_id!r} is duplicated. One "
+                "entry per key; revocation is permanent (rotate instead of "
+                "re-revoking)."
+            )
+        seen_key_ids.add(entry.key_id)
+        _validate_iso8601_utc(entry.revoked_at, f"entries[{i}].revoked_at")
+        if entry.reason not in _REVOCATION_REASON_WHITELIST:
+            raise ValueError(
+                f"entries[{i}].reason must be one of "
+                f"{sorted(_REVOCATION_REASON_WHITELIST)}; got {entry.reason!r}"
+            )
+        normalized.append(entry)
+
+    # --- root signing (same contract as derive_key_manifest) ---
+    if root_signing_callback is not None and not isinstance(root_key_id, str):
+        raise ValueError(
+            "root_key_id is required when root_signing_callback is provided"
+        )
+    if root_key_id is not None:
+        if not isinstance(root_key_id, str) or not root_key_id:
+            raise ValueError("root_key_id must be a non-empty string")
+        if len(root_key_id) > _KEY_MANIFEST_ROOT_KEY_ID_MAX or "\x00" in root_key_id:
+            raise ValueError("root_key_id invalid (cap 256, no NUL)")
+
+    list_hash = _compute_revocation_list_hash(
+        deployer_id=deployer_id,
+        entries=[e.to_dict() for e in normalized],
+        issued_at=issued_at,
+        list_version=REVOCATION_LIST_SCHEMA_VERSION,
+        root_key_id=root_key_id,
+    )
+
+    root_signature: Optional[str] = None
+    if root_signing_callback is not None:
+        sig_bytes = root_signing_callback(list_hash.encode("ascii"))
+        if not isinstance(sig_bytes, (bytes, bytearray)) or len(sig_bytes) != 64:
+            raise ValueError(
+                "root_signing_callback must return 64 bytes (raw Ed25519 signature)"
+            )
+        root_signature = base64.b64encode(bytes(sig_bytes)).decode("ascii")
+
+    return RevocationList(
+        deployer_id=deployer_id,
+        entries=tuple(normalized),
+        issued_at=issued_at,
+        list_version=REVOCATION_LIST_SCHEMA_VERSION,
+        list_hash=list_hash,
+        root_signature=root_signature,
+        root_key_id=root_key_id,
     )

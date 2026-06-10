@@ -5,6 +5,38 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-06-10
+
+**Headline: Key Revocation -- a leaked key gets a signed, dated tombstone the runtime cannot erase.** v0.8.1 told the auditor which keys are real. v0.9.0 tells them which keys STOPPED being real -- and proves no one quietly un-revoked anything.
+
+**BREAKING (the scheduled one):** `legacy_canonical=True` now raises `ValueError` (sunset phase 2, committed in v0.7.1). Pre-v0.6.1 archival chains must be re-archived under a v0.6.1..v0.8.x release before upgrading. All v0.6.1+ chains are unaffected.
+
+### Added
+
+- **`RevocationList` + `derive_revocation_list()`** (RV-1) -- root-signed, OUT-OF-BAND artifact listing revoked key_ids + revocation timestamps + reason codes (`compromised` | `superseded` | `ceased_operation` | `unspecified`, closed whitelist). Same offline-root ceremony as KeyManifest. Entries permanent (revocation cannot be undone -- rotate instead); entry ORDER is part of `list_hash` (reordering is tampering); the empty root-signed list is valid and meaningful ("nothing revoked as of date X" as a signed claim). **Design Decision 1: out-of-band, NOT in-chain** -- a compromised runtime controls the chain and would suppress its own revocation; the list lives outside the attacker's write path.
+- **`verify_key_provenance()` check #6: `revocation_status`** (RV-2) -- `NOT_REVOKED` | `REVOKED` | `REVOKED_BUT_CERT_PREDATES` | `NOT_CHECKED` | `LIST_INVALID`. REVOKED and LIST_INVALID fail `overall_valid`; certs signed before `revoked_at` stay valid (X.509/OCSP semantics); a bad list is worse than no list (tampered hash / deployer mismatch / bad root signature -> LIST_INVALID failure, never silent "nothing revoked"). Runs standalone even without a manifest. New `ProvenanceReport.revocation_status` field (additive, defaults `NOT_CHECKED`).
+- **`Shield.record_key_revocation(key_id, reason, revoked_at)`** (RV-3) -- writes an ADVISORY `key_revoked` audit event. Explicitly NOT the security boundary (documented in-code and in COMPLIANCE.md).
+- **`ShieldConfig.revocation_list_path`** (+ `CLOAKLLM_REVOCATION_LIST` env) (RV-3) -- when set, `Shield.__init__` **fail-hards with RuntimeError if its own signing key is revoked** (the v0.8.2 doctrine), and an unreadable list also fail-hards (a deployer who configured revocation checking must not run blind).
+- **`provenance_summary` revocation rollup** (RV-4, additive) -- `revocation_checked` / `revoked_keys_found` / `certs_after_revocation`. `generate_compliance_report()` gains `revocation_list_path` parameter (defaults to config). Pre-v0.9.0 reports keep false/null defaults; KM-9 manifests fields now MERGE rather than replace (fixed the replace-bug class that would have dropped additive keys).
+- **`cloakllm key-manifest revoke`** (RV-5) -- the offline revocation ceremony: appends to an existing list (or creates one), refuses re-revocation, root-signs. `key-manifest verify` gains `--revocation-list`; text output includes `revocation_status`.
+- **MCP `get_key_manifest`** (RV-6) -- response gains `revocation_status` when a list is configured (no new tool; stays at 12).
+- **`SPIKE_timestamping.md`** (TS-1) -- RFC 3161 vs sigstore Rekor research memo for v1.0 trusted timestamping. Recommendation: RFC 3161 checkpoint-level stamping (eIDAS alignment + offline verification + dependency discipline).
+
+### Removed
+
+- **`legacy_canonical` encoder path** (LC-1, phase 2 of the v0.7.1 sunset). `_legacy_canonical_json` deleted from `_canonical.py`; encoder branch deleted from `_compute_hash`; `--legacy-canonical-json` CLI flag deleted. The `legacy_canonical` kwarg remains in `verify_chain` / `verify_audit` signatures for ONE more cycle raising an actionable `ValueError` (a bare TypeError would strand the operator who most needs guidance); hard-delete in v1.0.
+
+### Tests
+
+- 755 -> 787 tests (+32): new `tests/test_revocation_list.py` covers RV-1 (9), RV-2 (9), RV-3 advisory + own-key fail-hard (7), RV-4 report fields (3), AUDIT-3 adversarial (4). `test_v071_extensions.py` sunset tests updated to phase-2 expectations (raise, actionable+ASCII message, default unchanged); `test_canonical_consistency.py` legacy tests replaced with a removal guard.
+
+### Compatibility
+
+- All v0.6.1+ audit chains verify under v0.9.0 unchanged. Pre-v0.6.1 chains: see BREAKING above.
+- Revocation surface is opt-in additive: no list configured -> zero behavior change.
+- `ProvenanceReport` gains `revocation_status` (default `NOT_CHECKED`) -- additive to `to_dict()` JSON output.
+- MCP CI gains a wait-for-PyPI step (CI-1) closing the 3-release-old propagation-lag retrigger dance.
+
 ## [0.8.2] - 2026-05-31
 
 **Headline: "don't surprise the deployer."** Closes the v0.8.1 KeyManifest install-experience gap: bare `pip install cloakllm` doesn't pull an Ed25519 backend, and v0.8.1 silently swallowed the resulting `ImportError` at `Shield.__init__` -- the deployer thought they were emitting `key_registered` events but they weren't. v0.8.2 makes this **fail-hard with a clear, actionable error**.

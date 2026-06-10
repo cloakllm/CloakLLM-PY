@@ -19,7 +19,7 @@ Standalone usage:
     # sanitized: "Send email to [EMAIL_0] about [ORG_0]"
 """
 
-__version__ = "0.8.2"
+__version__ = "0.9.0"
 
 from cloakllm.shield import Shield
 from cloakllm.config import ShieldConfig
@@ -41,6 +41,11 @@ from cloakllm.attestation import (
     # v0.8.1 KM-2: ProvenanceReport + verify_key_provenance
     ProvenanceReport,
     verify_key_provenance,
+    # v0.9.0 RV-1/RV-2: key revocation
+    RevocationEntry,
+    RevocationList,
+    derive_revocation_list,
+    REVOCATION_LIST_SCHEMA_VERSION,
 )
 from cloakllm.context_analyzer import ContextAnalyzer, RiskAssessment
 from cloakllm.backends import DetectorBackend, RegexBackend, NerBackend, LlmBackend
@@ -93,6 +98,10 @@ __all__ = [
     "KEY_MANIFEST_SCHEMA_VERSION",
     "ProvenanceReport",
     "verify_key_provenance",
+    "RevocationEntry",
+    "RevocationList",
+    "derive_revocation_list",
+    "REVOCATION_LIST_SCHEMA_VERSION",
     "ContextAnalyzer",
     "RiskAssessment",
     "validate_token",

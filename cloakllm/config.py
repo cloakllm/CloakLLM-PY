@@ -261,6 +261,19 @@ class ShieldConfig:
         default_factory=lambda: os.getenv("CLOAKLLM_KEY_VALID_UNTIL", None)
     )
 
+    # --- v0.9.0 RV-3: revocation list awareness ---
+    # Path to the deployer's published RevocationList JSON. When set:
+    #   (1) Shield.__init__ fail-hards (RuntimeError) if its OWN signing key
+    #       appears in the list -- signing with a revoked key is always a
+    #       mistake (the v0.8.2 "don't surprise the deployer" doctrine).
+    #   (2) generate_compliance_report() uses it by default to fill the
+    #       revocation fields in attestation.provenance_summary.
+    # The list itself is the OUT-OF-BAND security boundary; this knob just
+    # makes the runtime and report tooling aware of it.
+    revocation_list_path: Optional[str] = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_REVOCATION_LIST", None)
+    )
+
     # --- Enterprise Key Management (v0.6.0, Python only) ---
     # Provider for attestation signing keys.
     # Accepted values: "aws_kms" | "gcp_kms" | "azure_keyvault" | "hashicorp_vault" | None
