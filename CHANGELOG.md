@@ -5,6 +5,21 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-06-17
+
+**Headline: EU AI Act Article 50 content-labeling compliance record-keeping.** The same audit+report engine that resolves the Article 12 Paradox now produces machine-readable, regulator-facing proof that synthetic content was AI-generated and whether it was labeled -- for the Dec 2, 2026 Article 50 transparency deadline. One compliance report now proves Article 12 + 4a + 19 + 50 together, the intersection no competitor occupies. CloakLLM stays in the record-keeping lane; it does NOT enter the asset-watermarking fight (C2PA / Adobe / SynthID own pixel-embedding).
+
+### Added
+- **`content_generation` audit event** (A50-1) carrying a `content_context` field: `modality` (text|image|audio|video, closed whitelist), `labeled`, `disclosure_method` (c2pa|watermark|metadata|visible_notice|none, closed whitelist), `synthetic`, `deepfake` (Art 50(4)), plus optional `c2pa_manifest_hash` (forward-compat hook) and `content_hash` (caller-computed SHA-256). B3 allow-list validation + event_type coupling (the field may ONLY appear on `content_generation` events) + AUDIT-3 hardening from day 1.
+- **`Shield.record_content_generation()`** (A50-2) -- writes one event. The asset bytes never reach CloakLLM; the caller hashes their own content and passes the digest. `article_ref=[EU_AI_Act_Art_12, EU_AI_Act_Art_19, EU_AI_Act_Art_50]` in compliance mode.
+- **Article 50 report rollup** (A50-3) on the `EU_AI_Act_Art_50` row: `generation_events`, `labeled_events`, `label_coverage_pct` (int when whole), `deepfake_events`, `modality_distribution`. **Correctness invariant (tested): these stats attach ONLY to the Art_50 row, never to Art_12/Art_19** even though events claim all three -- the same invariant proven for `bias_sessions` on Art_4a in v0.8.0. Merge-not-replace fill (the KM-9/RV-4 discipline).
+- **Verdict extension** (A50-4): any unlabeled synthetic-content event flips the report to NON_COMPLIANT with `per_article.EU_AI_Act_Art_50: N of M generation events unlabeled`. Strict in v0.10.0 (a `label_coverage_threshold` config is a v0.10.1 add if the Art 50(2) "technically infeasible" carve-out is needed).
+- **`cloakllm content-log <dir>` CLI** (A50-5) -- human-readable Article 50 summary (coverage %, modality breakdown, unlabeled-event list). Exit 0/1 on coverage for CI gating. ASCII-only output.
+
+### Compatibility
+- **Drop-in safe from v0.9.0.** Purely additive: pre-v0.10.0 chains have no `content_generation` events, so no Art_50 row appears and behavior is unchanged. All v0.6.1+ chains verify under v0.10.0. No schema bump (additive report fields, same posture as KM-9/RV-4).
+- 787 -> 839 tests (+52).
+
 ## [0.9.0] - 2026-06-10
 
 **Headline: Key Revocation -- a leaked key gets a signed, dated tombstone the runtime cannot erase.** v0.8.1 told the auditor which keys are real. v0.9.0 tells them which keys STOPPED being real -- and proves no one quietly un-revoked anything.

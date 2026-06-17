@@ -961,6 +961,87 @@ class Shield:
                     "KeyManifest, and update the deployment."
                 )
 
+    def record_content_generation(
+        self,
+        *,
+        modality: str,
+        synthetic: bool = True,
+        labeled: bool = False,
+        disclosure_method: str = "none",
+        deepfake: bool = False,
+        c2pa_manifest_hash: Optional[str] = None,
+        content_hash: Optional[str] = None,
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
+        decision_id: Optional[str] = None,
+    ) -> None:
+        """v0.10.0 A50-2: write a content_generation audit event for EU AI
+        Act Article 50 transparency record-keeping.
+
+        Records that a synthetic-content generation occurred, by which
+        system, and whether a machine-readable AI-generation label /
+        deep-fake disclosure was applied -- WITHOUT the content ever
+        entering CloakLLM. The caller hashes their own bytes and passes the
+        digest as `content_hash`; CloakLLM never sees the asset (the
+        no-content-in-logs invariant -- the Article 12 guarantee extended to
+        Article 50). The event additionally satisfies Article 12 / 19
+        record-keeping (article_ref=[Art_12,Art_19,Art_50] in compliance
+        mode), so one compliance report proves them together.
+
+        Args:
+            modality: text | image | audio | video.
+            synthetic: True if the output is artificially generated.
+            labeled: True if a machine-readable AI-generation label was applied.
+            disclosure_method: c2pa | watermark | metadata | visible_notice | none.
+            deepfake: True for Article 50(4) deep-fake disclosure trigger.
+            c2pa_manifest_hash: optional hash of a downstream C2PA manifest
+                (forward-compat hook; pass None in v0.10.0 unless you embed one).
+            content_hash: optional SHA-256 of the generated asset, computed
+                caller-side. PII-safe (hash only, never the content).
+            model: optional model identifier that generated the content.
+            provider: optional provider (anthropic, openai, etc.).
+            decision_id: optional per-inference audit anchor (threads through
+                to reconcile this generation with other events for the same
+                user-facing decision). Default: a fresh ULID.
+
+        Raises:
+            ValueError: on an invalid modality or disclosure_method (the
+                audit-write boundary also re-validates via _validate_content_context).
+        """
+        from cloakllm.audit import (
+            _CONTENT_MODALITY_WHITELIST, _CONTENT_DISCLOSURE_WHITELIST,
+        )
+        if modality not in _CONTENT_MODALITY_WHITELIST:
+            raise ValueError(
+                f"modality must be one of {sorted(_CONTENT_MODALITY_WHITELIST)} "
+                f"(got {modality!r})"
+            )
+        if disclosure_method not in _CONTENT_DISCLOSURE_WHITELIST:
+            raise ValueError(
+                f"disclosure_method must be one of "
+                f"{sorted(_CONTENT_DISCLOSURE_WHITELIST)} (got {disclosure_method!r})"
+            )
+        resolved_decision_id = decision_id or generate_ulid()
+        content_context = {
+            "modality": modality,
+            "synthetic": bool(synthetic),
+            "labeled": bool(labeled),
+            "disclosure_method": disclosure_method,
+            "deepfake": bool(deepfake),
+            "c2pa_manifest_hash": c2pa_manifest_hash,
+            "content_hash": content_hash,
+        }
+        self.audit.log(
+            event_type="content_generation",
+            model=model,
+            provider=provider,
+            content_context=content_context,
+            decision_id=resolved_decision_id,
+            system_version_pin=_compose_system_version_pin(
+                model, self.config.deployment_version, self.config.instruction_version,
+            ),
+        )
+
     def record_key_revocation(
         self,
         key_id: str,

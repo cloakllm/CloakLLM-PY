@@ -116,6 +116,32 @@
             "type": "integer",
             "minimum": 0,
             "description": "Article 4a only: count of bias_finding events."
+          },
+          "generation_events": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Article 50 only (v0.10.0): count of content_generation events."
+          },
+          "labeled_events": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Article 50 only (v0.10.0): count of content_generation events with labeled=true."
+          },
+          "label_coverage_pct": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Article 50 only (v0.10.0): labeled_events / generation_events as a percentage (int when whole). <100 => NON_COMPLIANT (strict)."
+          },
+          "deepfake_events": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Article 50 only (v0.10.0): count of content_generation events with deepfake=true (Art 50(4) disclosures)."
+          },
+          "modality_distribution": {
+            "type": "object",
+            "additionalProperties": {"type": "integer"},
+            "description": "Article 50 only (v0.10.0): generation_events broken down by modality (text|image|audio|video)."
           }
         }
       }

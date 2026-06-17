@@ -192,6 +192,93 @@ def cmd_compliance_report(args):
         sys.exit(1)
 
 
+def cmd_content_log(args):
+    """v0.10.0 A50-5: human-readable EU AI Act Article 50 summary of
+    content_generation events in an audit log directory.
+
+    Shows label-coverage %, modality breakdown, deep-fake count, and the
+    list of unlabeled generation events. Exit codes: 0 = full label
+    coverage (COMPLIANT for Article 50), 1 = at least one unlabeled
+    synthetic-content event (CI-friendly, mirrors compliance-report).
+    """
+    from cloakllm import Shield, ShieldConfig
+
+    _warn_if_outside_cwd(args.log_dir)
+    log_dir = Path(args.log_dir)
+    if not log_dir.exists():
+        print(f"[FAIL] Log directory not found: {log_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    # Official rollup via the report engine, filtered to Article 50.
+    config = ShieldConfig(log_dir=log_dir, audit_enabled=False)
+    shield = Shield(config=config)
+    report = shield.generate_compliance_report(
+        articles=["EU_AI_Act_Art_50"], format="json",
+    )
+    art50 = report.get("per_article", {}).get("EU_AI_Act_Art_50", {})
+    gen = art50.get("generation_events", 0)
+
+    print("CloakLLM -- EU AI Act Article 50 content-labeling summary")
+    print(f"Audit dir: {log_dir}")
+    print("")
+    if not gen:
+        print("No content_generation events found in scope.")
+        return
+
+    labeled = art50.get("labeled_events", 0)
+    coverage = art50.get("label_coverage_pct", 0)
+    print(f"Generation events:   {gen}")
+    print(f"Labeled events:      {labeled}")
+    print(f"Label coverage:      {coverage}%")
+    print(f"Deep-fake events:    {art50.get('deepfake_events', 0)}")
+    md = art50.get("modality_distribution", {})
+    if md:
+        md_str = ", ".join(f"{m}={n}" for m, n in sorted(md.items()))
+        print(f"Modality breakdown:  {md_str}")
+
+    # List the unlabeled events (read raw entries -- the report rollup is
+    # aggregate-only). ASCII-only output (the v0.7.0 Windows console lesson).
+    unlabeled = []
+    for jsonl in sorted(log_dir.glob("*.jsonl")):
+        with open(jsonl, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                if entry.get("event_type") != "content_generation":
+                    continue
+                cc = entry.get("content_context") or {}
+                if cc.get("labeled") is not True:
+                    unlabeled.append((
+                        entry.get("seq"),
+                        entry.get("decision_id"),
+                        cc.get("modality"),
+                        cc.get("disclosure_method"),
+                    ))
+
+    if unlabeled:
+        print("")
+        print(f"Unlabeled generation events ({len(unlabeled)}):")
+        for seq, did, modality, disc in unlabeled:
+            print(
+                f"  * seq={seq} decision_id={did} modality={modality} "
+                f"disclosure_method={disc}"
+            )
+
+    if report.get("verdict") != "COMPLIANT":
+        print("", file=sys.stderr)
+        print("[FAIL] Article 50 verdict: NON_COMPLIANT", file=sys.stderr)
+        for r in report.get("verdict_reasons", []):
+            print(f"  * {r}", file=sys.stderr)
+        sys.exit(1)
+    print("")
+    print("[OK] Article 50: full label coverage.")
+
+
 # --- v0.8.1 KM-5: key-manifest CLI -----------------------------------
 
 def cmd_key_manifest_generate(args):
@@ -454,6 +541,14 @@ def main():
         help="Include per-decision_id rollup (large on high-volume chains).",
     )
 
+    # content-log (v0.10.0 A50-5) -- EU AI Act Article 50 summary view.
+    cl_parser = subparsers.add_parser(
+        "content-log",
+        help="Summarize Article 50 content_generation events (label coverage, "
+             "modality breakdown, unlabeled events). Exit 1 if any unlabeled.",
+    )
+    cl_parser.add_argument("log_dir", help="Path to audit log directory")
+
     # key-manifest (v0.8.1 KM-5) -- externally-verifiable key provenance.
     # Three actions: generate (one-time ceremony to bind a key to a deployer),
     # verify (an auditor checks a cert+manifest pair), show (read-only inspect).
@@ -549,6 +644,8 @@ def main():
         cmd_stats(args)
     elif args.command == "compliance-report":
         cmd_compliance_report(args)
+    elif args.command == "content-log":
+        cmd_content_log(args)
     elif args.command == "key-manifest":
         if args.km_action == "generate":
             cmd_key_manifest_generate(args)

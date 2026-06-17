@@ -198,6 +198,125 @@ def _validate_key_manifest(km: dict) -> None:
             )
 
 
+# v0.10.0 A50-1: content_generation event records a synthetic-content
+# generation for EU AI Act Article 50 transparency record-keeping. The
+# `content_context` field carries metadata + hashes ONLY -- never the
+# generated content itself (the no-PII-in-logs invariant extends here).
+_CONTENT_GENERATION_EVENT_TYPE = "content_generation"
+
+_CONTENT_CONTEXT_ALLOWED_KEYS = frozenset({
+    "modality", "synthetic", "labeled", "disclosure_method",
+    "deepfake", "c2pa_manifest_hash", "content_hash",
+})
+_CONTENT_CONTEXT_REQUIRED_KEYS = frozenset({
+    "modality", "synthetic", "labeled", "disclosure_method", "deepfake",
+})
+_CONTENT_MODALITY_WHITELIST = frozenset({"text", "image", "audio", "video"})
+_CONTENT_DISCLOSURE_WHITELIST = frozenset({
+    "c2pa", "watermark", "metadata", "visible_notice", "none",
+})
+_CONTENT_CONTEXT_BOOL_FIELDS = frozenset({"synthetic", "labeled", "deepfake"})
+_CONTENT_CONTEXT_STR_MAX_LEN = {
+    "modality": 16,
+    "disclosure_method": 32,
+    "c2pa_manifest_hash": 128,   # sha256 hex = 64; cap higher
+    "content_hash": 128,
+}
+# Keys that would smuggle the generated content into the log. The whole
+# point of recording a hash is that the content never enters CloakLLM;
+# a content/text/output/payload key is a hard rejection (defence-in-depth,
+# mirrors _PII_FORBIDDEN_KEYS for bias_context / entity_details).
+_CONTENT_CONTEXT_FORBIDDEN_KEYS = frozenset({
+    "content", "text", "output", "payload", "body", "data", "asset",
+})
+
+
+def _validate_content_context(ctx: dict) -> None:
+    """v0.10.0 A50-1: validate the `content_context` field on
+    content_generation events.
+
+    Strict allow-list + closed whitelists (modality, disclosure_method) +
+    bool/hash type checks. AUDIT-3 hardening from day 1.
+
+    INVARIANT: content_context must carry metadata + hashes ONLY, never the
+    generated content. A content/text/output/etc. key is a hard rejection --
+    the no-PII-in-logs guarantee extends to generated content.
+
+    Raises RuntimeError on any violation.
+    """
+    if not isinstance(ctx, dict):
+        raise RuntimeError(
+            f"AUDIT SCHEMA VIOLATION: content_context must be a dict "
+            f"(got {type(ctx).__name__})."
+        )
+    for required in _CONTENT_CONTEXT_REQUIRED_KEYS:
+        if required not in ctx:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: content_context missing required "
+                f"field {required!r}."
+            )
+    for k, v in ctx.items():
+        if not isinstance(k, str):
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: content_context key {k!r} must be a string."
+            )
+        # No-content invariant: reject any key that could carry the asset.
+        if k in _CONTENT_CONTEXT_FORBIDDEN_KEYS:
+            raise RuntimeError(
+                f"COMPLIANCE VIOLATION: content_context contains forbidden "
+                f"field {k!r}. Audit logs must not contain generated content "
+                f"-- record a content_hash, never the content itself."
+            )
+        if k not in _CONTENT_CONTEXT_ALLOWED_KEYS:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: content_context contains disallowed "
+                f"key {k!r}. Allowed: {sorted(_CONTENT_CONTEXT_ALLOWED_KEYS)}."
+            )
+        # Optional hash fields may be None.
+        if v is None:
+            if k in _CONTENT_CONTEXT_REQUIRED_KEYS:
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: content_context.{k} must not be null."
+                )
+            continue
+        if k in _CONTENT_CONTEXT_BOOL_FIELDS:
+            if not isinstance(v, bool):
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: content_context.{k} must be a bool "
+                    f"(got {type(v).__name__})."
+                )
+        elif k == "modality":
+            if v not in _CONTENT_MODALITY_WHITELIST:
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: content_context.modality must be "
+                    f"one of {sorted(_CONTENT_MODALITY_WHITELIST)} (got {v!r})."
+                )
+        elif k == "disclosure_method":
+            if v not in _CONTENT_DISCLOSURE_WHITELIST:
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: content_context.disclosure_method "
+                    f"must be one of {sorted(_CONTENT_DISCLOSURE_WHITELIST)} "
+                    f"(got {v!r})."
+                )
+        else:
+            # c2pa_manifest_hash / content_hash: optional str, capped, no NUL.
+            if not isinstance(v, str):
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: content_context.{k} must be a "
+                    f"string (got {type(v).__name__})."
+                )
+            limit = _CONTENT_CONTEXT_STR_MAX_LEN.get(k, 128)
+            if len(v) > limit:
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: content_context.{k} exceeds "
+                    f"{limit} chars (got {len(v)})."
+                )
+            if "\x00" in v:
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: content_context.{k} contains NUL byte."
+                )
+
+
 def _validate_bias_context(ctx: dict) -> None:
     """v0.7.0 A4a-3: validate the `bias_context` field shape.
 
@@ -475,6 +594,20 @@ def _validate_audit_entry_schema(entry_data: dict) -> None:
                 f"event_type='{_KEY_REGISTERED_EVENT_TYPE}' (got {ev!r})."
             )
 
+    # v0.10.0 A50-1: content_context (content_generation events for Article 50
+    # transparency record-keeping). Same coupling pattern as bias_context /
+    # key_manifest: content_context may ONLY appear on content_generation
+    # events, never on arbitrary sanitize/desanitize entries.
+    content_context = entry_data.get("content_context")
+    if content_context is not None:
+        _validate_content_context(content_context)
+        ev = entry_data.get("event_type")
+        if ev != _CONTENT_GENERATION_EVENT_TYPE:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: content_context requires "
+                f"event_type='{_CONTENT_GENERATION_EVENT_TYPE}' (got {ev!r})."
+            )
+
 
 def _assert_no_pii_in_entry(entry_data: dict) -> None:
     """
@@ -528,6 +661,11 @@ class AuditEntry:
                                                    # duplicate emission policy (verifier
                                                    # dedups by manifest_hash). Only valid
                                                    # on event_type='key_registered'.
+    # --- v0.10.0 A50-1 -- Article 50 Content-Labeling Record-Keeping ---
+    content_context: Optional[dict[str, Any]] = None  # Synthetic-content generation
+                                                      # metadata + hashes (NEVER the
+                                                      # content itself). Only valid on
+                                                      # event_type='content_generation'.
 
 
 # v0.6.4 BUG-3: single source of truth -- derive the allow-list from the
@@ -749,6 +887,7 @@ class AuditLogger:
         decision_id: Optional[str] = None,
         system_version_pin: Optional[str] = None,
         key_manifest: Optional[dict[str, Any]] = None,
+        content_context: Optional[dict[str, Any]] = None,
     ) -> Optional[AuditEntry]:
         """
         Append a new entry to the audit log.
@@ -790,6 +929,9 @@ class AuditLogger:
                 "system_version_pin": system_version_pin,
                 # v0.8.1 KM-3: key_manifest -- only present on key_registered events.
                 "key_manifest": key_manifest,
+                # v0.10.0 A50-1: content_context -- only present on
+                # content_generation events (Article 50 record-keeping).
+                "content_context": content_context,
             }
 
             # Compliance mode injection (v0.6.0) -- fields are part of the hash chain.
@@ -801,6 +943,12 @@ class AuditLogger:
                 # compliance reports can group them.
                 if event_type in _BIAS_VALID_EVENT_TYPES:
                     article_refs.append("EU_AI_Act_Art_4a")
+                # v0.10.0 A50-1: content_generation events ADDITIONALLY
+                # constitute Article 50 transparency record-keeping evidence
+                # (machine-readable proof the content was AI-produced and
+                # whether it was labeled). Exact parallel to Art_4a above.
+                if event_type == _CONTENT_GENERATION_EVENT_TYPE:
+                    article_refs.append("EU_AI_Act_Art_50")
                 # v0.8.1 KM-3: key_registered events are the cryptographic
                 # backbone of Article 19 ("automatically generated logs").
                 # The Art_19 article_ref is already present (compliance mode

@@ -66,8 +66,29 @@ _BIAS_EVENT_TYPES = frozenset({
     "bias_session_start", "bias_pseudonymise", "bias_finding", "bias_session_end",
 })
 
+# v0.10.0 A50-3: Article 50 content-labeling event type + the article whose
+# row the content-labeling stats attach to (and ONLY that row).
+_CONTENT_GENERATION_EVENT_TYPE = "content_generation"
+_ART_50 = "EU_AI_Act_Art_50"
+
 
 # --- Helpers ---
+
+
+def _pct(numerator: int, denominator: int) -> float:
+    """Percentage rounded to 2 dp, emitted as int when whole.
+
+    The int-when-whole coercion is the v0.7.0 cross-SDK numeric-divergence
+    lesson: Python's `100.0` canonical-JSON-encodes to `100.0` while JS's
+    `100` encodes to `100`, breaking byte-parity. Both SDKs emit an int when
+    the value is whole. Returns 0 (int) when denominator is 0.
+    """
+    if not denominator:
+        return 0
+    pct = round(100.0 * numerator / denominator, 2)
+    if isinstance(pct, float) and pct == int(pct):
+        return int(pct)
+    return pct
 
 
 def _in_period(ts: Optional[str], period: ReportPeriod) -> bool:
@@ -383,6 +404,17 @@ def build_report(
     bias_end_counts: dict[str, int] = {}      # article -> count of bias_session_end
     bias_end_wiped: dict[str, int] = {}       # article -> count of wipe_confirmed=True
 
+    # v0.10.0 A50-3: content-generation bookkeeping (Article 50). Accumulated
+    # per-article like bias, but wired ONLY onto the Art_50 row below -- the
+    # same correctness invariant: content_generation events carry
+    # article_ref=[Art_12,Art_19,Art_50], so an auditor reading the Article 12
+    # section must NOT see content-labeling stats there (Article 12 requires
+    # LOGGING; content-labeling happens to be one type of event you log).
+    content_gen_counts: dict[str, int] = {}       # article -> count of content_generation
+    content_labeled_counts: dict[str, int] = {}   # article -> count labeled=True
+    content_deepfake_counts: dict[str, int] = {}  # article -> count deepfake=True
+    content_modality_counts: dict[str, dict[str, int]] = {}  # article -> {modality: count}
+
     # Per-article decision tracking (uses sets to dedupe)
     article_decisions: dict[str, set[str]] = {}
 
@@ -450,6 +482,20 @@ def build_report(
                     bias_end_counts[art] = bias_end_counts.get(art, 0) + 1
                     if (entry.get("bias_context") or {}).get("wipe_confirmed") is True:
                         bias_end_wiped[art] = bias_end_wiped.get(art, 0) + 1
+
+            # v0.10.0 A50-3: content_generation bookkeeping (Article 50).
+            elif ev_type == _CONTENT_GENERATION_EVENT_TYPE:
+                content_gen_counts[art] = content_gen_counts.get(art, 0) + 1
+                cc = entry.get("content_context") or {}
+                if cc.get("labeled") is True:
+                    content_labeled_counts[art] = content_labeled_counts.get(art, 0) + 1
+                if cc.get("deepfake") is True:
+                    content_deepfake_counts[art] = content_deepfake_counts.get(art, 0) + 1
+                modality = cc.get("modality")
+                # AUDIT-3: only count a string modality (malformed entries skipped).
+                if isinstance(modality, str) and modality:
+                    md = content_modality_counts.setdefault(art, {})
+                    md[modality] = md.get(modality, 0) + 1
 
         # Decision-level rollup (optional)
         did = entry.get("decision_id")
@@ -519,6 +565,30 @@ def build_report(
             round(100.0 * wiped / ends, 2) if ends else 0.0
         )
 
+    # v0.10.0 A50-3: wire content-labeling fields ONLY onto the Article 50 row.
+    # content_generation events carry article_ref=[Art_12,Art_19,Art_50] (they
+    # ARE Article 12 record-keeping evidence too), so the naive "attach to every
+    # article that saw the event" would mislead an auditor reading the Article
+    # 12 section into thinking Article 12 mandates content labeling. It doesn't:
+    # Article 12 mandates LOGGING; content labeling is one type of event logged.
+    # The content-labeling rollup belongs on Art_50's row alone -- the exact
+    # correctness invariant proven for bias_sessions on Art_4a (v0.8.0).
+    if _ART_50 in article_stats and _ART_50 in content_gen_counts:
+        gen = content_gen_counts[_ART_50]
+        labeled = content_labeled_counts.get(_ART_50, 0)
+        # merge (not replace) -- never clobber evidence_event_count /
+        # decision_count already on the row (the KM-9 / RV-4 fix discipline).
+        article_stats[_ART_50].update({
+            "generation_events": gen,
+            "labeled_events": labeled,
+            # int when whole (the v0.7.0 cross-SDK numeric-divergence lesson).
+            "label_coverage_pct": _pct(labeled, gen),
+            "deepfake_events": content_deepfake_counts.get(_ART_50, 0),
+            "modality_distribution": dict(
+                sorted(content_modality_counts.get(_ART_50, {}).items())
+            ),
+        })
+
     # Verdict
     verdict_reasons: list[str] = []
     if not chain_valid:
@@ -530,6 +600,21 @@ def build_report(
         verdict_reasons.append(
             f"attestation: {signatures_valid}/{entries_with_certs} signatures valid"
         )
+    # v0.10.0 A50-4: Article 50 unlabeled-content check. Any synthetic-content
+    # generation event without a machine-readable AI-generation label is an
+    # Article 50(2) finding. v0.10.0 is strict -- there is no grace tolerance
+    # (a `label_coverage_threshold` config is a v0.10.1 add IF a user needs the
+    # Article 50(2) "technically infeasible" carve-out). Pre-v0.10.0 chains
+    # have no Art_50 row, so this is purely additive (zero behavior change).
+    _art50 = article_stats.get(_ART_50)
+    if _art50 is not None and "generation_events" in _art50:
+        gen = _art50["generation_events"]
+        labeled = _art50["labeled_events"]
+        if gen and labeled < gen:
+            verdict_reasons.append(
+                f"per_article.{_ART_50}: {gen - labeled} of {gen} generation "
+                f"events unlabeled"
+            )
     verdict = "COMPLIANT" if not verdict_reasons else "NON_COMPLIANT"
 
     # Attestation block (always present, even when 0 certs -- the schema
@@ -656,6 +741,16 @@ def render_markdown(report: dict) -> str:
                 lines.append(f"- Article 4a bias sessions: **{stats['bias_sessions']}**")
                 lines.append(f"- Bias findings recorded: **{stats.get('findings_recorded', 0)}**")
                 lines.append(f"- Token-map wipe confirmed: **{stats.get('wipe_confirmed_pct', 0)}%**")
+            # v0.10.0 A50-3: Article 50 content-labeling rollup.
+            if "generation_events" in stats:
+                lines.append(f"- Article 50 generation events: **{stats['generation_events']}**")
+                lines.append(f"- Labeled events: **{stats.get('labeled_events', 0)}**")
+                lines.append(f"- Label coverage: **{stats.get('label_coverage_pct', 0)}%**")
+                lines.append(f"- Deep-fake disclosures: **{stats.get('deepfake_events', 0)}**")
+                md = stats.get("modality_distribution", {})
+                if md:
+                    md_str = ", ".join(f"{m}={n}" for m, n in sorted(md.items()))
+                    lines.append(f"- Modality distribution: {md_str}")
             lines.append("")
 
     att = report["attestation"]
