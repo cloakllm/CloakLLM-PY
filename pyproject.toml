@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cloakllm"
-version = "0.10.0"
+version = "0.10.1"
 description = "AI Compliance Middleware — PII protection, tamper-evident audit logs, and EU AI Act compliance for LLM gateways"
 readme = "README.md"
 license = {text = "MIT"}
@@ -48,7 +48,10 @@ kms = [
     "hvac>=2.0,<3.0.0",
 ]
 # v0.6.1 H6: bumped cryptography floor to 46.0.7 (CVE-2026-26007, -34073, -39892 fixed in 46.0.7).
-dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "cryptography>=46.0.7,<47.0.0", "pip-audit>=2.7"]
+# v0.10.1: floor -> 48.0.1 (GHSA-537c-gmf6-5ccf); the old `<47.0.0` cap was blocking the fix,
+# leaving CI stuck on the now-vulnerable 46.0.7. cryptography is DEV-ONLY (the attestation
+# backend ships pynacl), so published wheels are unaffected -- this is a CI/dev-tree pin.
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "cryptography>=48.0.1,<50.0.0", "pip-audit>=2.7"]
 all = ["opentelemetry-api>=1.20,<2.0.0", "opentelemetry-sdk>=1.20,<2.0.0"]
 
 [project.scripts]

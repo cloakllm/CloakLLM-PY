@@ -5,6 +5,10 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-06-18
+
+**Dev-dependency security patch (no runtime/API change).** Bumps the `dev`-extra `cryptography` pin from `>=46.0.7,<47.0.0` to `>=48.0.1,<50.0.0` to pick up the fix for **GHSA-537c-gmf6-5ccf**. The old `<47.0.0` upper cap was blocking the fix, leaving `pip-audit` (and CI) stuck on the now-vulnerable 46.0.7. **`cryptography` is a dev-only dependency** — the runtime Ed25519 backend ships `pynacl`, so end users (`pip install cloakllm` / `cloakllm[attestation]`) were never exposed; this only affects contributors installing `cloakllm[dev]`. Carrying the corrected pin into published wheel metadata follows the v0.6.5 python-dotenv precedent. No code, no test, no API changes from 0.10.0.
+
 ## [0.10.0] - 2026-06-17
 
 **Headline: EU AI Act Article 50 content-labeling compliance record-keeping.** The same audit+report engine that resolves the Article 12 Paradox now produces machine-readable, regulator-facing proof that synthetic content was AI-generated and whether it was labeled -- for the Dec 2, 2026 Article 50 transparency deadline. One compliance report now proves Article 12 + 4a + 19 + 50 together, the intersection no competitor occupies. CloakLLM stays in the record-keeping lane; it does NOT enter the asset-watermarking fight (C2PA / Adobe / SynthID own pixel-embedding).
