@@ -14,8 +14,27 @@ Three heuristic signals:
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
+
+
+def _round3_canonical(x: float):
+    """v0.10.3 HIGH-4: cross-SDK-identical 3dp rounding for the risk-assessment
+    floats that land in the audit hash chain.
+
+    Python `round(x, 3)` uses banker's rounding (half-even) and emits a float
+    even when whole (`0.0`, `1.0`), while JS `Math.round(x*1000)/1000` rounds
+    half-up and emits an int (`0`, `1`). The same logical risk_assessment thus
+    hashed to different bytes in the two SDKs. This helper uses half-up integer
+    flooring (`floor(x*1000 + 0.5)/1000`, identical in both SDKs since it is
+    pure IEEE-754 ops) and returns an int when the value is whole -- so the
+    canonical bytes match JS exactly. Returns int 0 for 0.0.
+    """
+    r = math.floor(x * 1000 + 0.5) / 1000
+    if r == int(r):
+        return int(r)
+    return r
 
 
 TOKEN_RE = re.compile(r"\[[A-Z][A-Z0-9_]*_(?:\d+|REDACTED)\]", re.IGNORECASE)
@@ -71,10 +90,10 @@ class ContextAnalyzer:
         """
         if not sanitized_text or not sanitized_text.strip():
             return RiskAssessment(
-                token_density=0.0,
+                token_density=_round3_canonical(0.0),
                 identifying_descriptors=0,
                 relationship_edges=0,
-                risk_score=0.0,
+                risk_score=_round3_canonical(0.0),
                 risk_level="low",
                 warnings=[],
             )
@@ -112,10 +131,10 @@ class ContextAnalyzer:
         risk_level = "high" if risk_score > 0.7 else "medium" if risk_score > 0.3 else "low"
 
         return RiskAssessment(
-            token_density=round(token_density, 3),
+            token_density=_round3_canonical(token_density),
             identifying_descriptors=descriptor_count,
             relationship_edges=relationship_count,
-            risk_score=round(risk_score, 3),
+            risk_score=_round3_canonical(risk_score),
             risk_level=risk_level,
             warnings=warnings[:5],
         )

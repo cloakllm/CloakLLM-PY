@@ -410,7 +410,13 @@ class TestBuildReportAdversarialInputs:
             period=ReportPeriod(None, None),
             cloakllm_version="0.8.0",
         )
-        assert r["verdict"] == "COMPLIANT"
+        # v0.10.3 MEDIUM-6: the adversarial set includes a pii_in_log=true entry
+        # (seq 5) with empty article_ref. Pre-fix this was silently ignored
+        # (no per_article row -> COMPLIANT) -- the exact bug. The no-PII-in-logs
+        # invariant is global, so the verdict must now be NON_COMPLIANT. The
+        # test's purpose (no crash on malformed input) still holds.
+        assert r["verdict"] == "NON_COMPLIANT"
+        assert any("pii_in_log=true" in x for x in r["verdict_reasons"])
         # Only the 2 entries with valid string timestamps + valid article_ref
         # list count toward total.
         assert r["chain_integrity"]["total_entries"] == 2
@@ -489,3 +495,58 @@ class TestProvenanceSummary:
 
 # Need imports at top -- pytest will resolve
 from cloakllm import DeploymentKeyPair
+
+
+# ===================================================================
+# v0.10.3: cross-SDK parity for wipe_confirmed_pct + within_validity_window_pct
+# (both now route through the exact-integer _pct -- regression guard against
+# the banker's-vs-half-up divergence found post-v0.10.0).
+# ===================================================================
+
+from cloakllm.compliance_report import build_report, ReportPeriod, _pct
+
+
+def _bias_entry(seq, etype, **bc):
+    return dict(
+        seq=seq, event_id="e%d" % seq, timestamp="2026-05-01T10:00:0%d.000000+00:00" % (seq % 10),
+        event_type=etype, model=None, provider=None, entity_count=0, categories={},
+        tokens_used=[], prompt_hash="", sanitized_hash="", latency_ms=0, mode=None,
+        entity_details=[], timing=None, certificate_hash=None, key_id=None,
+        prev_hash="0" * 64, entry_hash="x", metadata={}, risk_assessment=None,
+        article_ref=["EU_AI_Act_Art_12", "EU_AI_Act_Art_19", "EU_AI_Act_Art_4a"],
+        decision_id="d%d" % seq, bias_context=bc,
+    )
+
+
+class TestWipeConfirmedPctParityV0103:
+    def test_fractional_wipe_is_two_dp_half_up(self):
+        # 1 of 3 wiped -> 33.33 (was Py 33.33 vs JS 33.3 under the old 1dp path)
+        entries = [
+            _bias_entry(0, "bias_session_start", session_id="s0", purpose="audit"),
+            _bias_entry(1, "bias_session_start", session_id="s1", purpose="audit"),
+            _bias_entry(2, "bias_session_start", session_id="s2", purpose="audit"),
+            _bias_entry(3, "bias_session_end", session_id="s0", wipe_confirmed=True),
+            _bias_entry(4, "bias_session_end", session_id="s1", wipe_confirmed=False),
+            _bias_entry(5, "bias_session_end", session_id="s2", wipe_confirmed=False),
+        ]
+        rep = build_report(audit_entries=entries, period=ReportPeriod(None, None),
+                           cloakllm_version="0.10.3")
+        assert rep["per_article"]["EU_AI_Act_Art_4a"]["wipe_confirmed_pct"] == 33.33
+
+    def test_full_wipe_is_int_100(self):
+        entries = [
+            _bias_entry(0, "bias_session_start", session_id="s0", purpose="audit"),
+            _bias_entry(1, "bias_session_end", session_id="s0", wipe_confirmed=True),
+        ]
+        rep = build_report(audit_entries=entries, period=ReportPeriod(None, None),
+                           cloakllm_version="0.10.3")
+        v = rep["per_article"]["EU_AI_Act_Art_4a"]["wipe_confirmed_pct"]
+        assert v == 100 and isinstance(v, int)
+
+
+class TestWithinWindowPctParityV0103:
+    def test_routes_through_pct_helper(self):
+        # The provenance fill uses _pct now; the half-way boundary value is the
+        # cross-SDK contract (1 of 800 -> 0.13, was 0.12 under banker's round()).
+        assert _pct(1, 800) == 0.13
+        assert _pct(0, 0) == 0

@@ -846,8 +846,16 @@ class Shield:
                 f"'json' | 'markdown' | 'pdf'."
             )
 
-        # Load entries from this Shield's audit log directory. The audit
-        # logger has been verified already; we just need raw entries here.
+        # v0.10.3 CRITICAL-1 fix: ACTUALLY verify the hash chain before
+        # building the report. Previously this method loaded raw entries and
+        # presumed the chain valid (build_report hardcoded chain_valid=True),
+        # so a tampered audit log produced a regulator-facing "verified /
+        # COMPLIANT" verdict -- the exact failure Article 19 attestation
+        # exists to prevent. Now we run verify_chain and thread its real
+        # verdict + anomalies into build_report.
+        is_valid, chain_errors, _final_seq = self.audit.verify_chain()
+
+        # Load entries from this Shield's audit log directory.
         entries = []
         log_dir = Path(self.config.log_dir)
         if log_dir.exists():
@@ -889,6 +897,8 @@ class Shield:
             audit_dir=str(log_dir),
             include_decisions=include_decisions,
             revocation_list=revocation_list,
+            chain_valid=is_valid,
+            chain_anomalies=chain_errors,
         )
 
         # Render + optional write

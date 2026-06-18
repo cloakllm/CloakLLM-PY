@@ -25,14 +25,41 @@ import json
 from typing import Any
 
 
+# v0.10.3 HIGH-5 (cross-SDK integrity): the JS canonicalizer rejects these
+# object key names; Python must reject them too, or the same logical object
+# hashes to different bytes in the two SDKs (Python's json.dumps would happily
+# serialize "constructor" as a key, JS would not). These names never occur in
+# legitimate hashed/attestation data (the audit schema validators block them
+# upstream), so a hard error is safe and keeps the two canonicalizers in lock-step.
+_FORBIDDEN_CANONICAL_KEYS = frozenset({"__proto__", "constructor", "prototype"})
+
+
+def _reject_forbidden_keys(obj: Any) -> None:
+    """Recursively raise if any dict key is a prototype-pollution vector."""
+    if isinstance(obj, dict):
+        for k in obj:
+            if k in _FORBIDDEN_CANONICAL_KEYS:
+                raise ValueError(
+                    f"canonical_json: disallowed object key {k!r} "
+                    f"(prototype-pollution vector; not permitted in canonical output)"
+                )
+            _reject_forbidden_keys(obj[k])
+    elif isinstance(obj, (list, tuple)):
+        for item in obj:
+            _reject_forbidden_keys(item)
+
+
 def canonical_json(obj: Any) -> str:
     """
     Canonical JSON encoding for cross-SDK hash/signature consistency.
 
     Raises:
-        ValueError: if obj contains non-finite floats (NaN, +Inf, -Inf) or
-                    non-string object keys.
+        ValueError: if obj contains non-finite floats (NaN, +Inf, -Inf),
+                    non-string object keys, or a prototype-pollution key name
+                    (__proto__ / constructor / prototype) -- the last so Python
+                    and JS canonical bytes never diverge on those keys.
     """
+    _reject_forbidden_keys(obj)
     # json.dumps with allow_nan=False raises on NaN/Inf. ensure_ascii=False
     # keeps UTF-8 bytes (matches JS JSON.stringify output).
     return json.dumps(

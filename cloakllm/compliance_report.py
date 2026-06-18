@@ -260,15 +260,12 @@ def _fill_provenance_summary(
         if report.within_validity_window:
             within_window_n += 1
 
-    # v0.7.0 numeric-parity lesson: whole-number percentages are emitted as
-    # int in both SDKs (Python json.dumps(100) == JS JSON.stringify(100) ==
-    # "100"; vs the float "100.0" vs int "100" divergence we'd hit otherwise).
-    if within_window_total:
-        pct = round(100.0 * within_window_n / within_window_total, 2)
-    else:
-        pct = 0
-    if isinstance(pct, float) and pct == int(pct):
-        pct = int(pct)
+    # v0.10.3 C1-class fix: route through _pct (exact integer arithmetic).
+    # The old float round() used banker's rounding and diverged from JS
+    # Math.round (half-up) on .xx5 boundaries -- the same cross-SDK divergence
+    # fixed for label_coverage_pct in v0.10.2. _pct also emits int-when-whole
+    # (the v0.7.0 numeric-parity lesson) and int 0 for a zero denominator.
+    pct = _pct(within_window_n, within_window_total)
 
     # v0.9.0: UPDATE (not replace) so the RV-4 revocation keys -- and any
     # future additive keys -- survive this fill. The replace-style
@@ -343,6 +340,8 @@ def build_report(
     audit_dir: Optional[str] = None,
     include_decisions: bool = False,
     revocation_list=None,
+    chain_valid: bool = True,
+    chain_anomalies: Optional[list[str]] = None,
 ) -> dict:
     """Build a compliance report from an iterable of audit entries.
 
@@ -380,14 +379,21 @@ def build_report(
     seen_articles: set[str] = set()
     article_stats: dict[str, dict[str, Any]] = {}
     decision_stats: dict[str, dict[str, Any]] = {}
-    chain_anomalies: list[str] = []
+    # v0.10.3 CRITICAL-1 fix: chain verification is now done by the caller
+    # (Shield.generate_compliance_report runs verify_chain) and threaded in.
+    # The pure-function default stays True so unit tests can drive build_report
+    # with synthetic fixed-hash fixtures, but the PUBLIC API path always passes
+    # the real verify_chain result. Seeding chain_anomalies from the verifier's
+    # errors means a tampered/broken chain shows up as anomalies + verdict.
+    chain_anomalies: list[str] = list(chain_anomalies or [])
 
     # Period-tracking
     first_ts: Optional[str] = None
     last_ts: Optional[str] = None
     total_entries = 0
-    chain_valid = True  # No re-verification here; presumed verified by caller.
-                        # Future: integrate verify_chain output explicitly.
+    # v0.10.3 MEDIUM-6: set when ANY in-period entry has pii_in_log=true,
+    # independent of the article filter (the invariant is global).
+    global_pii_violation = False
 
     # Attestation aggregates
     entries_with_certs = 0
@@ -450,30 +456,48 @@ def build_report(
         # character-by-character ("a","r","t",...) and corrupt counts.
         raw_articles = entry.get("article_ref")
         entry_articles = raw_articles if isinstance(raw_articles, list) else []
+
+        # v0.10.3 MEDIUM-6 fix: the no-PII-in-logs invariant is GLOBAL -- it
+        # must be checked on EVERY in-period entry, regardless of the article
+        # filter. Previously this sat after the `continue` below, so scoping a
+        # report to one article could hide a pii_in_log=true violation in an
+        # out-of-scope entry (false COMPLIANT). Record it globally here.
+        if entry.get("pii_in_log") is True:
+            global_pii_violation = True
+            chain_anomalies.append(
+                f"seq={entry.get('seq')}: COMPLIANCE VIOLATION pii_in_log=true"
+            )
+
         if articles:
             if not any(a in articles for a in entry_articles):
                 continue
 
         total_entries += 1
 
-        # PII-in-log invariant check (compliance violation if True)
+        # Per-article pii_in_log flag (in-scope rows only -- the global
+        # violation above already guarantees the verdict flips).
         if entry.get("pii_in_log") is True:
             for a in entry_articles:
                 _ensure_article(a)["pii_in_log"] = True
-            chain_anomalies.append(
-                f"seq={entry.get('seq')}: COMPLIANCE VIOLATION pii_in_log=true"
-            )
 
         # Per-article stats
         for art in entry_articles:
             stats = _ensure_article(art)
             stats["evidence_event_count"] += 1
 
-            # Categories aggregation
-            for cat, cnt in (entry.get("categories") or {}).items():
-                stats["categories_detected"][cat] = (
-                    stats["categories_detected"].get(cat, 0) + cnt
-                )
+            # Categories aggregation. v0.10.3 HIGH-3: AUDIT-3 hardening --
+            # malformed categories (non-dict, or non-int counts) must NOT
+            # crash the report. Skip anything that isn't {str: int}.
+            raw_cats = entry.get("categories")
+            if isinstance(raw_cats, dict):
+                for cat, cnt in raw_cats.items():
+                    if not isinstance(cat, str):
+                        continue
+                    if isinstance(cnt, bool) or not isinstance(cnt, int):
+                        continue
+                    stats["categories_detected"][cat] = (
+                        stats["categories_detected"].get(cat, 0) + cnt
+                    )
 
             # Decision tracking
             did = entry.get("decision_id")
@@ -528,8 +552,16 @@ def build_report(
             d["entry_count"] += 1
             for art in entry_articles:
                 d["articles_touched"].add(art)
-            for cat, cnt in (entry.get("categories") or {}).items():
-                d["categories"][cat] = d["categories"].get(cat, 0) + cnt
+            # v0.10.3 HIGH-3: same AUDIT-3 categories hardening as the per-
+            # article loop -- malformed categories must not crash the report.
+            _raw_cats = entry.get("categories")
+            if isinstance(_raw_cats, dict):
+                for cat, cnt in _raw_cats.items():
+                    if not isinstance(cat, str):
+                        continue
+                    if isinstance(cnt, bool) or not isinstance(cnt, int):
+                        continue
+                    d["categories"][cat] = d["categories"].get(cat, 0) + cnt
             # v0.8.0 AUDIT-3: only compare when both sides are non-empty
             # strings -- malformed entries with int/None ts must not crash.
             if ts_is_string:
@@ -579,9 +611,11 @@ def build_report(
         article_stats[_ART_4A]["findings_recorded"] = bias_finding_counts.get(_ART_4A, 0)
         ends = bias_end_counts.get(_ART_4A, 0)
         wiped = bias_end_wiped.get(_ART_4A, 0)
-        article_stats[_ART_4A]["wipe_confirmed_pct"] = (
-            round(100.0 * wiped / ends, 2) if ends else 0.0
-        )
+        # v0.10.3 C1-class fix: _pct (exact integer arithmetic) instead of
+        # float round(). The old path was BOTH banker's-rounding AND 2dp on
+        # Python vs JS Math.round(1000*w/e)/10 (HALF-UP and only 1dp) -- a
+        # double divergence (precision + rounding mode). Now byte-identical.
+        article_stats[_ART_4A]["wipe_confirmed_pct"] = _pct(wiped, ends)
 
     # v0.10.0 A50-3: wire content-labeling fields ONLY onto the Article 50 row.
     # content_generation events carry article_ref=[Art_12,Art_19,Art_50] (they
@@ -607,23 +641,25 @@ def build_report(
             ),
         })
 
-    # Verdict
+    # --- Verdict (part 1: chain + PII + Article 50) ---
     verdict_reasons: list[str] = []
     if not chain_valid:
         verdict_reasons.append(f"chain_integrity: broken ({len(chain_anomalies)} anomalies)")
-    for a, s in article_stats.items():
-        if s.get("pii_in_log") is True:
-            verdict_reasons.append(f"per_article.{a}: pii_in_log=true")
-    if entries_with_certs > 0 and signatures_valid < entries_with_certs:
+    # In-scope per-article PII rows (existing reason format).
+    pii_rows = [a for a, s in article_stats.items() if s.get("pii_in_log") is True]
+    for a in pii_rows:
+        verdict_reasons.append(f"per_article.{a}: pii_in_log=true")
+    # v0.10.3 MEDIUM-6: a pii_in_log=true entry that was FILTERED OUT by the
+    # article scope (so it has no per_article row) must still flip the verdict
+    # -- the no-PII-in-logs invariant is global, not article-scoped.
+    if global_pii_violation and not pii_rows:
         verdict_reasons.append(
-            f"attestation: {signatures_valid}/{entries_with_certs} signatures valid"
+            "no_pii_in_logs: pii_in_log=true on an out-of-scope in-period entry"
         )
     # v0.10.0 A50-4: Article 50 unlabeled-content check. Any synthetic-content
     # generation event without a machine-readable AI-generation label is an
-    # Article 50(2) finding. v0.10.0 is strict -- there is no grace tolerance
-    # (a `label_coverage_threshold` config is a v0.10.1 add IF a user needs the
-    # Article 50(2) "technically infeasible" carve-out). Pre-v0.10.0 chains
-    # have no Art_50 row, so this is purely additive (zero behavior change).
+    # Article 50(2) finding. Strict (no grace tolerance). Pre-v0.10.0 chains
+    # have no Art_50 row, so this is purely additive.
     _art50 = article_stats.get(_ART_50)
     if _art50 is not None and "generation_events" in _art50:
         gen = _art50["generation_events"]
@@ -633,24 +669,29 @@ def build_report(
                 f"per_article.{_ART_50}: {gen - labeled} of {gen} generation "
                 f"events unlabeled"
             )
-    verdict = "COMPLIANT" if not verdict_reasons else "NON_COMPLIANT"
 
-    # Attestation block (always present, even when 0 certs -- the schema
-    # validates against the same shape regardless)
+    # Attestation block. Built BEFORE finalising the verdict so the verdict can
+    # use the REAL, checkable attestation signal (KeyManifest provenance)
+    # rather than an unverifiable certificate count.
     attestation = _empty_attestation()
     attestation["entries_with_certificates"] = entries_with_certs
+    # v0.10.3 CRITICAL-2: `signatures_valid` is a COUNT of entries carrying a
+    # certificate reference -- NOT a per-signature cryptographic verification.
+    # The audit log stores only a SHA-256 of each certificate signature (for
+    # cross-referencing), never the certificate itself, so per-entry Ed25519
+    # signatures are not re-verifiable from the log alone. The verifiable
+    # attestation signal is KeyManifest provenance (filled below). The old
+    # `signatures_valid < entries_with_certs` verdict guard was dead code that
+    # falsely implied cryptographic signature verification; removed.
     attestation["signatures_valid"] = signatures_valid
     attestation["key_ids"] = sorted(key_ids)
 
-    # v0.8.1 KM-9: fill in provenance_summary from key_registered events.
-    # Pre-v0.8.1 chains have no key_registered events -- provenance_summary
-    # stays all-null (additive back-compat with v0.8.0 reports).
+    # v0.8.1 KM-9: fill provenance_summary from key_registered events.
     _fill_provenance_summary(
         audit_entries_replay=audit_entries_buffered,
         period=period,
         attestation=attestation,
     )
-
     # v0.9.0 RV-4: fill revocation rollup when a list was supplied.
     _fill_revocation_summary(
         audit_entries_replay=audit_entries_buffered,
@@ -658,6 +699,19 @@ def build_report(
         attestation=attestation,
         revocation_list=revocation_list,
     )
+
+    # --- Verdict (part 2: real attestation check) ---
+    # v0.10.3 CRITICAL-2: if any KeyManifest failed provenance verification
+    # (verify_key_provenance ran in _fill_provenance_summary), that IS a real,
+    # checkable NON_COMPLIANT condition -- unlike the old cert count.
+    _ps = attestation.get("provenance_summary") or {}
+    _mf, _mv = _ps.get("manifests_found"), _ps.get("manifests_valid")
+    if isinstance(_mf, int) and isinstance(_mv, int) and _mf > 0 and _mv < _mf:
+        verdict_reasons.append(
+            f"attestation: {_mv}/{_mf} key manifests passed provenance verification"
+        )
+
+    verdict = "COMPLIANT" if not verdict_reasons else "NON_COMPLIANT"
 
     report: dict[str, Any] = {
         "report_metadata": {

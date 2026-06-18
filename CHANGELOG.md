@@ -5,6 +5,20 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.3] - 2026-06-18
+
+**Compliance-report integrity release.** A deep audit + security review (three independent adversarial passes) of the audit/report engine found six real bugs, all confirmed by reproduction and now fixed + regression-guarded. Several were latent since v0.8.0. No public API or schema-shape change; the verdict is now *more* correct (it actually verifies what it claims).
+
+### Fixed
+- **CRITICAL-1 — the report never verified the hash chain.** `generate_compliance_report()` loaded raw entries and presumed the chain valid (`build_report` hardcoded `chain_valid=True`), so a **tampered audit log produced a regulator-facing "verified / COMPLIANT" verdict** — the exact failure Article 19 attestation exists to prevent. It now runs `verify_chain()` and threads the real verdict + anomalies in. Tampered chains → `NON_COMPLIANT` / `chain_integrity: broken`.
+- **CRITICAL-2 — the report falsely implied per-signature verification.** `signatures_valid` was an unconditional count of cert-bearing entries (so the `signatures_valid < entries_with_certs` verdict guard was dead code), implying cryptographic verification that the log cannot provide — it stores only a *hash* of each certificate, never the certificate. The dead guard is removed; `signatures_valid` is documented as a count, and the verifiable attestation signal is **KeyManifest provenance** (a failed provenance check is now a real `NON_COMPLIANT` reason).
+- **HIGH-3 — `build_report` crashed on malformed `categories`** (`AttributeError`/`TypeError` on non-dict or non-int counts). Now hardened (AUDIT-3): only `{str: int}` entries aggregate, everything else is skipped.
+- **HIGH-4 — cross-SDK hash divergence in `context_analyzer`.** `token_density`/`risk_score` entered the audit hash chain as float `0.0`/`1.0` (Python) vs int `0`/`1` (JS), plus banker's-vs-half-up rounding. Both now use a shared exact, int-when-whole 3dp helper → byte-identical.
+- **HIGH-5 — the two canonicalizers disagreed on `__proto__`/`constructor`/`prototype` keys** (JS silently dropped them, Python serialized them) → different hash for the same object, and a silent-drop is a forgery seam. Both now reject these key names with a hard error.
+- **MEDIUM-6 — an `articles=` filter could hide a `pii_in_log=true` violation** in an out-of-scope entry (false COMPLIANT). The no-PII-in-logs invariant is now evaluated globally, independent of the article filter.
+
+Py 858 → 882 tests (+24, incl. a dedicated `test_v0103_audit_fixes.py`). Drop-in safe from 0.10.x.
+
 ## [0.10.2] - 2026-06-18
 
 **Two correctness fixes in the v0.10.0 Article 50 report logic, found by a post-release adversarial review.** Both are additive/behavioral fixes — no API or schema change.

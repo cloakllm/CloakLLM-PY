@@ -178,11 +178,13 @@
         },
         "entries_with_certificates": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "description": "Count of in-period entries carrying a certificate_hash reference."
         },
         "signatures_valid": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "description": "v0.10.3: a COUNT of entries carrying a certificate reference -- NOT a per-signature cryptographic verification. The audit log stores only a hash of each certificate, never the certificate itself, so per-entry Ed25519 signatures are not re-verifiable from the log alone. The verifiable attestation signal is KeyManifest provenance (attestation.provenance_summary.manifests_valid)."
         },
         "key_ids": {
           "type": "array",
@@ -205,7 +207,7 @@
     },
     "verdict": {
       "enum": ["COMPLIANT", "NON_COMPLIANT"],
-      "description": "Overall report verdict. COMPLIANT iff chain_integrity.verdict='verified' AND no per_article entry has pii_in_log=true AND signatures_valid == entries_with_certificates (when attestation enabled)."
+      "description": "Overall report verdict. COMPLIANT iff chain_integrity.verdict='verified' (the hash chain is actually re-verified as of v0.10.3) AND no in-period entry has pii_in_log=true (a global invariant, independent of any article filter) AND every KeyManifest passed provenance verification (attestation.provenance_summary.manifests_valid == manifests_found, when any are present)."
     },
     "verdict_reasons": {
       "type": "array",
