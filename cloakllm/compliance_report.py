@@ -76,16 +76,25 @@ _ART_50 = "EU_AI_Act_Art_50"
 
 
 def _pct(numerator: int, denominator: int) -> float:
-    """Percentage rounded to 2 dp, emitted as int when whole.
+    """Percentage rounded to 2 dp (round half up), emitted as int when whole.
 
-    The int-when-whole coercion is the v0.7.0 cross-SDK numeric-divergence
-    lesson: Python's `100.0` canonical-JSON-encodes to `100.0` while JS's
-    `100` encodes to `100`, breaking byte-parity. Both SDKs emit an int when
-    the value is whole. Returns 0 (int) when denominator is 0.
+    v0.10.2 C1 fix: computed in EXACT INTEGER arithmetic, not via float
+    `round()`. Python's `round(x, 2)` uses banker's rounding (round-half-to-
+    even) while JS `Math.round` rounds half toward +Inf, so the old float
+    path diverged on any `.xx5` boundary (e.g. 1 labeled of 800 -> Py 0.12 vs
+    JS 0.13), silently breaking the cross-SDK byte-identical report guarantee.
+    The integer form `(10000*n + d//2)//d` is deterministic and identical in
+    both SDKs (Number is exact for these magnitudes). This is the v0.7.0
+    numeric-divergence lesson, one layer deeper.
+
+    The int-when-whole coercion keeps `100` from serializing as `100.0`.
+    Returns 0 (int) when denominator is 0.
     """
     if not denominator:
         return 0
-    pct = round(100.0 * numerator / denominator, 2)
+    # Round half up to 2 dp using only integers: centi = round(10000*n/d).
+    centi = (10000 * numerator + denominator // 2) // denominator
+    pct = centi / 100
     if isinstance(pct, float) and pct == int(pct):
         return int(pct)
     return pct
@@ -484,18 +493,27 @@ def build_report(
                         bias_end_wiped[art] = bias_end_wiped.get(art, 0) + 1
 
             # v0.10.0 A50-3: content_generation bookkeeping (Article 50).
+            # v0.10.2 H1 fix: the Article 50 labeling obligation applies to
+            # SYNTHETIC / AI-generated content only (Art 50(2)). A non-synthetic
+            # content_generation record (synthetic=False) carries no labeling
+            # duty, so it must NOT count toward the coverage stats or the
+            # verdict -- otherwise an honest deployer logging non-AI provenance
+            # gets a false NON_COMPLIANT. Such events still count as generic
+            # Art 50 evidence (evidence_event_count) but not as a labeling
+            # obligation. Gate the whole rollup on synthetic is True.
             elif ev_type == _CONTENT_GENERATION_EVENT_TYPE:
-                content_gen_counts[art] = content_gen_counts.get(art, 0) + 1
                 cc = entry.get("content_context") or {}
-                if cc.get("labeled") is True:
-                    content_labeled_counts[art] = content_labeled_counts.get(art, 0) + 1
-                if cc.get("deepfake") is True:
-                    content_deepfake_counts[art] = content_deepfake_counts.get(art, 0) + 1
-                modality = cc.get("modality")
-                # AUDIT-3: only count a string modality (malformed entries skipped).
-                if isinstance(modality, str) and modality:
-                    md = content_modality_counts.setdefault(art, {})
-                    md[modality] = md.get(modality, 0) + 1
+                if cc.get("synthetic") is True:
+                    content_gen_counts[art] = content_gen_counts.get(art, 0) + 1
+                    if cc.get("labeled") is True:
+                        content_labeled_counts[art] = content_labeled_counts.get(art, 0) + 1
+                    if cc.get("deepfake") is True:
+                        content_deepfake_counts[art] = content_deepfake_counts.get(art, 0) + 1
+                    modality = cc.get("modality")
+                    # AUDIT-3: only count a string modality (malformed skipped).
+                    if isinstance(modality, str) and modality:
+                        md = content_modality_counts.setdefault(art, {})
+                        md[modality] = md.get(modality, 0) + 1
 
         # Decision-level rollup (optional)
         did = entry.get("decision_id")

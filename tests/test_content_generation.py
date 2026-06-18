@@ -27,7 +27,9 @@ from cloakllm.audit import (
     _validate_content_context, _validate_audit_entry_schema,
     AuditLogger,
 )
-from cloakllm.compliance_report import ReportPeriod, build_report, render_markdown
+from cloakllm.compliance_report import (
+    ReportPeriod, build_report, render_markdown, _pct,
+)
 
 
 def _valid_cc(**overrides):
@@ -354,3 +356,78 @@ class TestBackwardCompat:
             assert ok, errs
         finally:
             os.chdir(cwd)
+
+
+# ===================================================================
+# v0.10.2 C1: cross-SDK _pct rounding parity (regression guard)
+# ===================================================================
+
+class TestPctRoundingC1:
+    """The v0.10.0 float `round()` used banker's rounding and diverged from
+    JS `Math.round` (half-up) on any .xx5 boundary -- e.g. 1 labeled of 800.
+    _pct now uses exact integer half-up arithmetic. These values are the
+    cross-SDK contract; the JS mirror asserts the SAME numbers."""
+
+    def test_half_way_boundary_rounds_half_up(self):
+        # 100*1/800 = 0.125 exactly -> half up -> 0.13 (was 0.12 under round())
+        assert _pct(1, 800) == 0.13
+
+    def test_zero_denominator_is_int_zero(self):
+        v = _pct(0, 0)
+        assert v == 0 and isinstance(v, int)
+
+    def test_whole_is_int_not_float(self):
+        v = _pct(5, 5)
+        assert v == 100 and isinstance(v, int)
+
+    @pytest.mark.parametrize("n,d,expected", [
+        (1, 800, 0.13), (1, 3, 33.33), (2, 3, 66.67), (5, 7, 71.43),
+        (4, 5, 80), (1, 8, 12.5), (7, 9, 77.78), (1, 16, 6.25),
+        (3, 7, 42.86), (999, 1000, 99.9), (1, 1, 100), (0, 5, 0),
+    ])
+    def test_pct_contract_values(self, n, d, expected):
+        assert _pct(n, d) == expected
+
+    def test_boundary_in_full_report(self, shield):
+        """End-to-end: 1 labeled of 800 through the report engine -> 0.13."""
+        shield.record_content_generation(modality="text", labeled=True)
+        for _ in range(799):
+            shield.record_content_generation(modality="text", labeled=False)
+        a50 = shield.generate_compliance_report(format="json")["per_article"]["EU_AI_Act_Art_50"]
+        assert a50["label_coverage_pct"] == 0.13
+
+
+# ===================================================================
+# v0.10.2 H1: Article 50 obligation applies to SYNTHETIC content only
+# ===================================================================
+
+class TestSyntheticScopingH1:
+    """A non-synthetic content_generation event carries no Article 50 labeling
+    duty; it must NOT count toward coverage or flip the verdict."""
+
+    def test_non_synthetic_unlabeled_is_compliant(self, shield):
+        shield.record_content_generation(
+            modality="text", synthetic=False, labeled=False, disclosure_method="none",
+        )
+        rep = shield.generate_compliance_report(format="json")
+        assert rep["verdict"] == "COMPLIANT"
+        # the Art_50 row exists as evidence but has no labeling-obligation stats
+        a50 = rep["per_article"].get("EU_AI_Act_Art_50", {})
+        assert "generation_events" not in a50
+
+    def test_synthetic_unlabeled_still_non_compliant(self, shield):
+        shield.record_content_generation(
+            modality="text", synthetic=True, labeled=False, disclosure_method="none",
+        )
+        assert shield.generate_compliance_report(format="json")["verdict"] == "NON_COMPLIANT"
+
+    def test_mixed_counts_synthetic_only(self, shield):
+        shield.record_content_generation(modality="image", synthetic=True, labeled=True,
+                                         disclosure_method="c2pa")
+        shield.record_content_generation(modality="text", synthetic=False, labeled=False,
+                                         disclosure_method="none")
+        rep = shield.generate_compliance_report(format="json")
+        a50 = rep["per_article"]["EU_AI_Act_Art_50"]
+        assert a50["generation_events"] == 1          # only the synthetic one
+        assert a50["label_coverage_pct"] == 100
+        assert rep["verdict"] == "COMPLIANT"

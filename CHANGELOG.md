@@ -5,6 +5,16 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2] - 2026-06-18
+
+**Two correctness fixes in the v0.10.0 Article 50 report logic, found by a post-release adversarial review.** Both are additive/behavioral fixes — no API or schema change.
+
+### Fixed
+- **C1 (cross-SDK report divergence):** `label_coverage_pct` could differ between the Python and JS SDKs on a `.xx5` rounding boundary (e.g. 1 labeled of 800 → Python `0.12` via banker's rounding vs JS `0.13` via `Math.round`), silently breaking the byte-identical report guarantee. `_pct` now uses **exact integer arithmetic** (`(10000*n + d//2)//d`), identical on both SDKs. All other coverage values are unchanged.
+- **H1 (false NON_COMPLIANT on non-synthetic content):** the Article 50 labeling obligation applies to **synthetic / AI-generated** content only (Art 50(2)). A `content_generation` event with `synthetic=False` and `labeled=False` was wrongly counted as an unlabeled generation event and flipped the report to NON_COMPLIANT. The Art 50 rollup (`generation_events` / `labeled_events` / `label_coverage_pct` / `deepfake_events` / `modality_distribution`) and the verdict now count **synthetic events only**; non-synthetic records remain Art 50 evidence (`evidence_event_count`) but carry no labeling duty. Default usage (`synthetic=True`) is unchanged.
+
+Regression-guarded both SDKs (Py +19, JS +6 tests). Drop-in safe from 0.10.0/0.10.1. MCP picks up the fix automatically via its `cloakllm[attestation]>=0.10.0,<0.11.0` floor.
+
 ## [0.10.1] - 2026-06-18
 
 **Dev-dependency security patch (no runtime/API change).** Bumps the `dev`-extra `cryptography` pin from `>=46.0.7,<47.0.0` to `>=48.0.1,<50.0.0` to pick up the fix for **GHSA-537c-gmf6-5ccf**. The old `<47.0.0` upper cap was blocking the fix, leaving `pip-audit` (and CI) stuck on the now-vulnerable 46.0.7. **`cryptography` is a dev-only dependency** — the runtime Ed25519 backend ships `pynacl`, so end users (`pip install cloakllm` / `cloakllm[attestation]`) were never exposed; this only affects contributors installing `cloakllm[dev]`. Carrying the corrected pin into published wheel metadata follows the v0.6.5 python-dotenv precedent. No code, no test, no API changes from 0.10.0.
