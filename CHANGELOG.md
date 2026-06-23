@@ -5,6 +5,22 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-06-22
+
+**Headline: RFC 3161 trusted timestamping (checkpoint-level).** The audit chain is tamper-evident; trusted timestamps add an *external clock the deployer cannot control*, closing the last documented gap (an attacker holding both the signing key and the root key could otherwise fabricate a backdated history). A Time-Stamp Authority binds the chain's latest `entry_hash` to a UTC time under its own certificate, proving "every entry up to seq N existed no later than T". For EU AI Act audiences, an **eIDAS-qualified TSA** gives that timestamp legal presumption of accuracy. First concrete piece of the v1.0 suite.
+
+### Added
+- **`chain_checkpoint` audit event** + `checkpoint_context` (TS-1): closed whitelists (`hash_algorithm` sha256/sha512), https-only TSA URL, hex/base64 shape caps, NUL rejection, event_type coupling. The TSA only ever receives a hash; the checkpoint stores a hash + URL + opaque token only (no PII, no content). `article_ref=[Art_12, Art_19]`.
+- **RFC 3161 client** (TS-2): `request_timestamp()` builds the TimeStampReq, POSTs to the TSA (SSRF-hardened, reusing the `llm_detector` IP/redirect defenses; https-only), and parses the TimeStampToken. Backed by the optional `[timestamping]` extra (`asn1crypto` + `cryptography`).
+- **`Shield.checkpoint()`** (TS-3) + opt-in auto-cadence (`ShieldConfig.timestamp_interval_entries`, default 0 = off). Best-effort: a TSA outage never blocks or corrupts the writer. `CLOAKLLM_TSA_URL` / `CLOAKLLM_TSA_INTERVAL` / `CLOAKLLM_TSA_TRUSTED_CERTS` env.
+- **Offline verifier** (TS-4): `verify_timestamp_token()` checks the messageImprint, the CMS signature (reading the digest algorithm from the token -- handles SHA-256 **and** SHA-512 TSAs), and (when trust anchors are supplied) the signer-cert chain; extracts genTime. Verifies forever without network -- validated against real freetsa.org tokens.
+- **Report rollup** (TS-5): `attestation.provenance_summary` gains `timestamped_checkpoints` / `checkpoints_verified` / `earliest_provable_time` / `checkpoint_tsa_distribution` (additive, merge-not-replace). **Verify, don't assert**: every token is re-verified offline; a checkpoint whose token fails verification is a real NON_COMPLIANT reason.
+- **`cloakllm timestamp now` / `cloakllm timestamp verify` CLI** (TS-6, exit 0/1) + **`record_chain_checkpoint` MCP tool** (14th).
+- New `[timestamping]` optional dependency group.
+
+### Compatibility
+- **Drop-in safe from 0.10.x.** Opt-in: with no TSA configured there are zero new behaviors and no network calls. Chains without `chain_checkpoint` events need no new dependency. All v0.6.1+ chains verify; report byte-identical when no checkpoints. py = js = mcp re-aligned at 0.11.0.
+
 ## [0.10.3] - 2026-06-18
 
 **Compliance-report integrity release.** A deep audit + security review (three independent adversarial passes) of the audit/report engine found six real bugs, all confirmed by reproduction and now fixed + regression-guarded. Several were latent since v0.8.0. No public API or schema-shape change; the verdict is now *more* correct (it actually verifies what it claims).

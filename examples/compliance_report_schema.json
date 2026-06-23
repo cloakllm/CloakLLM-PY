@@ -200,6 +200,23 @@
             "root_signature_status_distribution": {
               "type": ["object", "null"],
               "additionalProperties": {"type": "integer"}
+            },
+            "timestamped_checkpoints": {
+              "type": ["integer", "null"],
+              "description": "v0.11.0: count of chain_checkpoint events in scope (null when none)."
+            },
+            "checkpoints_verified": {
+              "type": ["integer", "null"],
+              "description": "v0.11.0: count whose RFC 3161 token re-verified offline. < timestamped_checkpoints => NON_COMPLIANT (verify-don't-assert)."
+            },
+            "earliest_provable_time": {
+              "type": ["string", "null"],
+              "description": "v0.11.0: earliest valid TSA genTime (ISO 8601 UTC). Every entry before that checkpoint provably existed by then."
+            },
+            "checkpoint_tsa_distribution": {
+              "type": ["object", "null"],
+              "additionalProperties": {"type": "integer"},
+              "description": "v0.11.0: checkpoint counts by TSA URL."
             }
           }
         }

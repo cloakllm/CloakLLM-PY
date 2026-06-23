@@ -279,6 +279,108 @@ def cmd_content_log(args):
     print("[OK] Article 50: full label coverage.")
 
 
+# --- v0.11.0 TS-6: timestamp CLI -------------------------------------
+
+def cmd_timestamp_now(args):
+    """Stamp the audit chain's latest entry_hash at an RFC 3161 TSA and append
+    a chain_checkpoint event. Exit 0 on success, 1 on failure."""
+    from cloakllm import Shield, ShieldConfig
+    _warn_if_outside_cwd(args.log_dir)
+    log_dir = Path(args.log_dir)
+    if not log_dir.exists():
+        print(f"[FAIL] Log directory not found: {log_dir}", file=sys.stderr)
+        sys.exit(1)
+    tsa_url = args.tsa_url or os.getenv("CLOAKLLM_TSA_URL")
+    if not tsa_url:
+        print("[FAIL] No TSA URL. Pass --tsa-url or set CLOAKLLM_TSA_URL.", file=sys.stderr)
+        sys.exit(1)
+    shield = Shield(config=ShieldConfig(
+        log_dir=log_dir, compliance_mode="eu_ai_act_article12",
+        timestamp_authority_url=tsa_url,
+    ))
+    try:
+        cc = shield.checkpoint()
+    except Exception as e:
+        print(f"[FAIL] checkpoint failed: {e}", file=sys.stderr)
+        sys.exit(1)
+    if cc is None:
+        print("[FAIL] Nothing to stamp (empty chain).", file=sys.stderr)
+        sys.exit(1)
+    print("[OK] Chain checkpoint written.")
+    print(f"  stamped_seq:        {cc['stamped_seq']}")
+    print(f"  stamped_entry_hash: {cc['stamped_entry_hash']}")
+    print(f"  tsa_url:            {cc['tsa_url']}")
+
+
+def cmd_timestamp_verify(args):
+    """Verify every chain_checkpoint token in an audit dir OFFLINE. Exit 0 if
+    all verify, 1 otherwise."""
+    import json as _json
+    from cloakllm.timestamping import _ts_backend_available, verify_timestamp_token
+    _warn_if_outside_cwd(args.log_dir)
+    log_dir = Path(args.log_dir)
+    if not log_dir.exists():
+        print(f"[FAIL] Log directory not found: {log_dir}", file=sys.stderr)
+        sys.exit(1)
+    if not _ts_backend_available():
+        print("[FAIL] timestamping backend not installed: "
+              "pip install cloakllm[timestamping]", file=sys.stderr)
+        sys.exit(1)
+    trusted = None
+    if args.tsa_cert:
+        import re as _re
+        pem = Path(args.tsa_cert).read_text(encoding="utf-8")
+        trusted = _re.findall(
+            r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", pem, _re.DOTALL
+        ) or [pem]
+
+    found = verified = 0
+    earliest = None
+    for jf in sorted(log_dir.glob("*.jsonl")):
+        for line in jf.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                e = _json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if e.get("event_type") != "chain_checkpoint":
+                continue
+            cc = e.get("checkpoint_context") or {}
+            found += 1
+            try:
+                r = verify_timestamp_token(
+                    cc.get("tst_token_b64", ""),
+                    bytes.fromhex(cc.get("stamped_entry_hash", "")), trusted,
+                )
+            except Exception as ex:
+                print(f"  seq={e.get('seq')}: ERROR ({type(ex).__name__})")
+                continue
+            if r.valid:
+                verified += 1
+                if r.gen_time and (earliest is None or r.gen_time < earliest):
+                    earliest = r.gen_time
+                print(f"  seq={e.get('seq')}: OK   genTime={r.gen_time}"
+                      + (f" chain={r.chain_valid}" if trusted else ""))
+            else:
+                print(f"  seq={e.get('seq')}: INVALID ({r.reason})")
+
+    print("")
+    print(f"CloakLLM -- RFC 3161 checkpoint verification ({log_dir})")
+    print(f"  Checkpoints found:    {found}")
+    print(f"  Checkpoints verified: {verified}")
+    if earliest:
+        print(f"  Earliest provable:    {earliest}")
+    if found == 0:
+        print("  (no chain_checkpoint events)")
+        return
+    if verified < found:
+        print(f"[FAIL] {found - verified} checkpoint(s) failed verification.", file=sys.stderr)
+        sys.exit(1)
+    print("[OK] All checkpoints verified.")
+
+
 # --- v0.8.1 KM-5: key-manifest CLI -----------------------------------
 
 def cmd_key_manifest_generate(args):
@@ -549,6 +651,21 @@ def main():
     )
     cl_parser.add_argument("log_dir", help="Path to audit log directory")
 
+    # timestamp (v0.11.0 TS-6) -- RFC 3161 trusted timestamping.
+    ts_parser = subparsers.add_parser(
+        "timestamp",
+        help="RFC 3161 trusted timestamping of the audit chain (v0.11.0+)",
+    )
+    ts_sub = ts_parser.add_subparsers(dest="ts_action", help="Action")
+    ts_now = ts_sub.add_parser("now", help="Stamp the chain's latest entry_hash at a TSA")
+    ts_now.add_argument("log_dir", help="Path to audit log directory")
+    ts_now.add_argument("--tsa-url", default=None,
+                        help="TSA endpoint (https). Default: CLOAKLLM_TSA_URL env.")
+    ts_ver = ts_sub.add_parser("verify", help="Verify all checkpoint tokens offline")
+    ts_ver.add_argument("log_dir", help="Path to audit log directory")
+    ts_ver.add_argument("--tsa-cert", default=None,
+                        help="Optional PEM of trusted TSA cert(s) to also check the chain.")
+
     # key-manifest (v0.8.1 KM-5) -- externally-verifiable key provenance.
     # Three actions: generate (one-time ceremony to bind a key to a deployer),
     # verify (an auditor checks a cert+manifest pair), show (read-only inspect).
@@ -646,6 +763,13 @@ def main():
         cmd_compliance_report(args)
     elif args.command == "content-log":
         cmd_content_log(args)
+    elif args.command == "timestamp":
+        if args.ts_action == "now":
+            cmd_timestamp_now(args)
+        elif args.ts_action == "verify":
+            cmd_timestamp_verify(args)
+        else:
+            ts_parser.print_help()
     elif args.command == "key-manifest":
         if args.km_action == "generate":
             cmd_key_manifest_generate(args)

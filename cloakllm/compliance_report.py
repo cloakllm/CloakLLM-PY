@@ -71,6 +71,9 @@ _BIAS_EVENT_TYPES = frozenset({
 _CONTENT_GENERATION_EVENT_TYPE = "content_generation"
 _ART_50 = "EU_AI_Act_Art_50"
 
+# v0.11.0 TS-5: trusted-timestamping checkpoint event type.
+_CHAIN_CHECKPOINT_EVENT_TYPE = "chain_checkpoint"
+
 
 # --- Helpers ---
 
@@ -133,6 +136,12 @@ def _empty_attestation() -> dict:
             "revocation_checked": False,
             "revoked_keys_found": None,
             "certs_after_revocation": None,
+            # v0.11.0 TS-5 (additive): trusted-timestamping rollup. null when
+            # no chain_checkpoint events are present.
+            "timestamped_checkpoints": None,
+            "checkpoints_verified": None,
+            "earliest_provable_time": None,
+            "checkpoint_tsa_distribution": None,
         },
     }
 
@@ -331,6 +340,83 @@ def _fill_revocation_summary(
     attestation["provenance_summary"]["certs_after_revocation"] = certs_after
 
 
+def _fill_timestamp_summary(audit_entries_replay, period, attestation,
+                            trusted_certs_pem=None):
+    """v0.11.0 TS-5: aggregate chain_checkpoint events into provenance_summary.
+
+    VERIFY, DON'T ASSERT (the v0.10.3 lesson): every token is actually
+    re-verified offline. `checkpoints_verified` counts tokens that pass; a
+    checkpoint whose token fails verification is surfaced (and drives the
+    NON_COMPLIANT verdict via the returned anomaly list). `earliest_provable_time`
+    is the earliest VALID TSA genTime -- by hash-chain induction, every entry
+    before that checkpoint provably existed by then.
+
+    Returns a list of anomaly strings (empty when all checkpoints verify).
+    Leaves the timestamp fields null and returns [] when there are no
+    chain_checkpoint events (additive back-compat) or the optional backend is
+    not installed.
+    """
+    found = 0
+    verified = 0
+    earliest = None
+    tsa_dist: dict[str, int] = {}
+    anomalies: list[str] = []
+
+    # Collect checkpoints first so we can skip the backend import entirely
+    # when there are none (no optional-dep requirement for non-timestamp chains).
+    checkpoints = []
+    for entry in audit_entries_replay:
+        if entry.get("event_type") != _CHAIN_CHECKPOINT_EVENT_TYPE:
+            continue
+        ts = entry.get("timestamp")
+        if not _in_period(ts if isinstance(ts, str) else None, period):
+            continue
+        cc = entry.get("checkpoint_context")
+        if isinstance(cc, dict):
+            checkpoints.append((entry.get("seq"), cc))
+
+    if not checkpoints:
+        return []  # no timestamping in this chain -> fields stay null
+
+    try:
+        from cloakllm.timestamping import verify_timestamp_token
+    except ImportError:
+        # Backend not installed: we cannot verify. Be honest -- report the
+        # count but mark verification unavailable (do NOT claim verified).
+        attestation["provenance_summary"]["timestamped_checkpoints"] = len(checkpoints)
+        attestation["provenance_summary"]["checkpoints_verified"] = 0
+        return ["timestamping backend not installed: checkpoints not verified "
+                "(pip install cloakllm[timestamping])"]
+
+    for seq, cc in checkpoints:
+        found += 1
+        tsa = cc.get("tsa_url")
+        if isinstance(tsa, str):
+            tsa_dist[tsa] = tsa_dist.get(tsa, 0) + 1
+        try:
+            digest = bytes.fromhex(cc.get("stamped_entry_hash", ""))
+            res = verify_timestamp_token(
+                cc.get("tst_token_b64", ""), digest, trusted_certs_pem
+            )
+        except Exception as e:
+            anomalies.append(f"seq={seq}: checkpoint token error ({type(e).__name__})")
+            continue
+        if res.valid:
+            verified += 1
+            if res.gen_time and (earliest is None or res.gen_time < earliest):
+                earliest = res.gen_time
+        else:
+            anomalies.append(f"seq={seq}: checkpoint token INVALID ({res.reason})")
+
+    attestation["provenance_summary"].update({
+        "timestamped_checkpoints": found,
+        "checkpoints_verified": verified,
+        "earliest_provable_time": earliest,
+        "checkpoint_tsa_distribution": dict(sorted(tsa_dist.items())),
+    })
+    return anomalies
+
+
 def build_report(
     *,
     audit_entries: Iterable[dict],
@@ -342,6 +428,7 @@ def build_report(
     revocation_list=None,
     chain_valid: bool = True,
     chain_anomalies: Optional[list[str]] = None,
+    timestamp_trusted_certs: Optional[list[str]] = None,
 ) -> dict:
     """Build a compliance report from an iterable of audit entries.
 
@@ -700,6 +787,17 @@ def build_report(
         revocation_list=revocation_list,
     )
 
+    # v0.11.0 TS-5: fill the trusted-timestamping rollup. Tokens are actually
+    # re-verified offline (verify-don't-assert); failures become anomalies +
+    # a NON_COMPLIANT reason below.
+    _ts_anomalies = _fill_timestamp_summary(
+        audit_entries_replay=audit_entries_buffered,
+        period=period,
+        attestation=attestation,
+        trusted_certs_pem=timestamp_trusted_certs,
+    )
+    chain_anomalies.extend(_ts_anomalies)
+
     # --- Verdict (part 2: real attestation check) ---
     # v0.10.3 CRITICAL-2: if any KeyManifest failed provenance verification
     # (verify_key_provenance ran in _fill_provenance_summary), that IS a real,
@@ -709,6 +807,13 @@ def build_report(
     if isinstance(_mf, int) and isinstance(_mv, int) and _mf > 0 and _mv < _mf:
         verdict_reasons.append(
             f"attestation: {_mv}/{_mf} key manifests passed provenance verification"
+        )
+    # v0.11.0 TS-5: a checkpoint whose RFC 3161 token fails verification is a
+    # real NON_COMPLIANT condition (verify-don't-assert).
+    _tc, _tv = _ps.get("timestamped_checkpoints"), _ps.get("checkpoints_verified")
+    if isinstance(_tc, int) and isinstance(_tv, int) and _tc > 0 and _tv < _tc:
+        verdict_reasons.append(
+            f"timestamping: {_tv}/{_tc} chain checkpoints verified"
         )
 
     verdict = "COMPLIANT" if not verdict_reasons else "NON_COMPLIANT"

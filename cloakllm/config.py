@@ -274,6 +274,26 @@ class ShieldConfig:
         default_factory=lambda: os.getenv("CLOAKLLM_REVOCATION_LIST", None)
     )
 
+    # --- v0.11.0 TS-3: Trusted timestamping (RFC 3161), opt-in ---
+    # When set, Shield.checkpoint() and the auto-cadence stamp the chain's
+    # latest entry_hash at this TSA. None -> no timestamping (zero behavior
+    # change, no network calls). https-only.
+    timestamp_authority_url: Optional[str] = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_TSA_URL", None)
+    )
+    # Auto-checkpoint after this many audit entries. 0 (default) -> auto
+    # disabled (deployer must call checkpoint() explicitly, or set a positive
+    # interval). Keeps surprise network calls OFF by default.
+    timestamp_interval_entries: int = field(
+        default_factory=lambda: int(os.getenv("CLOAKLLM_TSA_INTERVAL", "0") or "0")
+    )
+    # Path to a PEM file of trusted TSA cert(s) for offline verification.
+    # We never vendor a CA list -- the deployer supplies the trust anchor
+    # (parity with KeyManifest root keys).
+    timestamp_trusted_certs_path: Optional[str] = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_TSA_TRUSTED_CERTS", None)
+    )
+
     # --- Enterprise Key Management (v0.6.0, Python only) ---
     # Provider for attestation signing keys.
     # Accepted values: "aws_kms" | "gcp_kms" | "azure_keyvault" | "hashicorp_vault" | None

@@ -317,6 +317,135 @@ def _validate_content_context(ctx: dict) -> None:
                 )
 
 
+# v0.11.0 TS-1: chain_checkpoint event records an RFC 3161 trusted-timestamp
+# over the chain's latest entry_hash -- an external clock proving "entries
+# 0..N existed no later than T". The checkpoint_context carries a hash, a URL,
+# and an opaque signed token ONLY -- structurally incapable of holding PII or
+# content (the TSA itself only ever receives the entry_hash).
+_CHAIN_CHECKPOINT_EVENT_TYPE = "chain_checkpoint"
+
+_CHECKPOINT_CONTEXT_ALLOWED_KEYS = frozenset({
+    "stamped_entry_hash", "tsa_url", "tst_token_b64",
+    "hash_algorithm", "stamped_seq",
+})
+_CHECKPOINT_CONTEXT_REQUIRED_KEYS = frozenset({
+    "stamped_entry_hash", "tsa_url", "tst_token_b64",
+    "hash_algorithm", "stamped_seq",
+})
+_CHECKPOINT_HASH_ALGO_WHITELIST = frozenset({"sha256", "sha512"})
+# A TimeStampToken (CMS SignedData) is typically 1-4 KB; cap base64 well above
+# that and reject anything larger (defends against an oversized-value DoS /
+# a smuggling attempt via the one free-ish field).
+_CHECKPOINT_TST_TOKEN_MAX_LEN = 16384
+_CHECKPOINT_STR_MAX_LEN = {
+    "stamped_entry_hash": 128,   # sha512 hex = 128
+    "tsa_url": 512,
+    "hash_algorithm": 16,
+}
+
+
+def _validate_checkpoint_context(ctx: dict) -> None:
+    """v0.11.0 TS-1: validate the `checkpoint_context` field on
+    chain_checkpoint events.
+
+    Strict allow-list + closed `hash_algorithm` whitelist + https-only TSA
+    URL + hex/base64 shape caps. AUDIT-3 hardening from day 1. Every field is
+    a hash, a URL, or an opaque signed blob -- none can carry PII/content.
+
+    Raises RuntimeError on any violation.
+    """
+    if not isinstance(ctx, dict):
+        raise RuntimeError(
+            f"AUDIT SCHEMA VIOLATION: checkpoint_context must be a dict "
+            f"(got {type(ctx).__name__})."
+        )
+    for required in _CHECKPOINT_CONTEXT_REQUIRED_KEYS:
+        if required not in ctx:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: checkpoint_context missing required "
+                f"field {required!r}."
+            )
+    for k, v in ctx.items():
+        if not isinstance(k, str):
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: checkpoint_context key {k!r} must be a string."
+            )
+        if k not in _CHECKPOINT_CONTEXT_ALLOWED_KEYS:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: checkpoint_context contains disallowed "
+                f"key {k!r}. Allowed: {sorted(_CHECKPOINT_CONTEXT_ALLOWED_KEYS)}."
+            )
+        if v is None:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: checkpoint_context.{k} must not be null."
+            )
+        if k == "stamped_seq":
+            # int (not bool), non-negative.
+            if isinstance(v, bool) or not isinstance(v, int):
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: checkpoint_context.stamped_seq must "
+                    f"be an int (got {type(v).__name__})."
+                )
+            if v < 0:
+                raise RuntimeError(
+                    "AUDIT SCHEMA VIOLATION: checkpoint_context.stamped_seq must be >= 0."
+                )
+            continue
+        if not isinstance(v, str):
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: checkpoint_context.{k} must be a string "
+                f"(got {type(v).__name__})."
+            )
+        if "\x00" in v:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: checkpoint_context.{k} contains NUL byte."
+            )
+        if k == "hash_algorithm":
+            if v not in _CHECKPOINT_HASH_ALGO_WHITELIST:
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: checkpoint_context.hash_algorithm must "
+                    f"be one of {sorted(_CHECKPOINT_HASH_ALGO_WHITELIST)} (got {v!r})."
+                )
+        elif k == "tsa_url":
+            if not v.startswith("https://"):
+                raise RuntimeError(
+                    "AUDIT SCHEMA VIOLATION: checkpoint_context.tsa_url must be an "
+                    "https:// URL."
+                )
+            if len(v) > _CHECKPOINT_STR_MAX_LEN["tsa_url"]:
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: checkpoint_context.tsa_url exceeds "
+                    f"{_CHECKPOINT_STR_MAX_LEN['tsa_url']} chars."
+                )
+        elif k == "stamped_entry_hash":
+            limit = _CHECKPOINT_STR_MAX_LEN["stamped_entry_hash"]
+            if len(v) > limit or not v:
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: checkpoint_context.stamped_entry_hash "
+                    f"must be 1..{limit} chars."
+                )
+            if any(c not in "0123456789abcdefABCDEF" for c in v):
+                raise RuntimeError(
+                    "AUDIT SCHEMA VIOLATION: checkpoint_context.stamped_entry_hash "
+                    "must be hex."
+                )
+        elif k == "tst_token_b64":
+            if len(v) > _CHECKPOINT_TST_TOKEN_MAX_LEN or not v:
+                raise RuntimeError(
+                    f"AUDIT SCHEMA VIOLATION: checkpoint_context.tst_token_b64 must "
+                    f"be 1..{_CHECKPOINT_TST_TOKEN_MAX_LEN} chars."
+                )
+            # base64 alphabet only (defence-in-depth; the real parse happens
+            # in the verifier).
+            import string as _string
+            _b64_alphabet = set(_string.ascii_letters + _string.digits + "+/=")
+            if any(c not in _b64_alphabet for c in v):
+                raise RuntimeError(
+                    "AUDIT SCHEMA VIOLATION: checkpoint_context.tst_token_b64 must "
+                    "be base64."
+                )
+
+
 def _validate_bias_context(ctx: dict) -> None:
     """v0.7.0 A4a-3: validate the `bias_context` field shape.
 
@@ -608,6 +737,19 @@ def _validate_audit_entry_schema(entry_data: dict) -> None:
                 f"event_type='{_CONTENT_GENERATION_EVENT_TYPE}' (got {ev!r})."
             )
 
+    # v0.11.0 TS-1: checkpoint_context (chain_checkpoint events for RFC 3161
+    # trusted timestamping). Same coupling pattern: it may ONLY appear on
+    # chain_checkpoint events.
+    checkpoint_context = entry_data.get("checkpoint_context")
+    if checkpoint_context is not None:
+        _validate_checkpoint_context(checkpoint_context)
+        ev = entry_data.get("event_type")
+        if ev != _CHAIN_CHECKPOINT_EVENT_TYPE:
+            raise RuntimeError(
+                f"AUDIT SCHEMA VIOLATION: checkpoint_context requires "
+                f"event_type='{_CHAIN_CHECKPOINT_EVENT_TYPE}' (got {ev!r})."
+            )
+
 
 def _assert_no_pii_in_entry(entry_data: dict) -> None:
     """
@@ -666,6 +808,12 @@ class AuditEntry:
                                                       # metadata + hashes (NEVER the
                                                       # content itself). Only valid on
                                                       # event_type='content_generation'.
+    # --- v0.11.0 TS-1 -- Trusted Timestamping (RFC 3161) ---
+    checkpoint_context: Optional[dict[str, Any]] = None  # RFC 3161 timestamp over
+                                                         # the chain's entry_hash
+                                                         # (hash + URL + opaque token
+                                                         # only). Only valid on
+                                                         # event_type='chain_checkpoint'.
 
 
 # v0.6.4 BUG-3: single source of truth -- derive the allow-list from the
@@ -888,6 +1036,7 @@ class AuditLogger:
         system_version_pin: Optional[str] = None,
         key_manifest: Optional[dict[str, Any]] = None,
         content_context: Optional[dict[str, Any]] = None,
+        checkpoint_context: Optional[dict[str, Any]] = None,
     ) -> Optional[AuditEntry]:
         """
         Append a new entry to the audit log.
@@ -932,6 +1081,9 @@ class AuditLogger:
                 # v0.10.0 A50-1: content_context -- only present on
                 # content_generation events (Article 50 record-keeping).
                 "content_context": content_context,
+                # v0.11.0 TS-1: checkpoint_context -- only present on
+                # chain_checkpoint events (RFC 3161 trusted timestamping).
+                "checkpoint_context": checkpoint_context,
             }
 
             # Compliance mode injection (v0.6.0) -- fields are part of the hash chain.
@@ -981,7 +1133,41 @@ class AuditLogger:
             self._prev_hash = entry_hash
             self._seq += 1
 
-            return AuditEntry(**entry_data)
+            entry = AuditEntry(**entry_data)
+        # (lock released) v0.11.0 TS-3: opt-in auto-checkpoint. Done OUTSIDE
+        # the lock and as a best-effort, swallow-all operation so a TSA outage
+        # can never block or corrupt the writer.
+        self._maybe_auto_checkpoint(event_type, entry)
+        return entry
+
+    def _maybe_auto_checkpoint(self, event_type, entry) -> None:
+        """v0.11.0 TS-3: stamp the chain at the configured cadence. Opt-in
+        (interval > 0 AND a TSA configured); never re-triggers on a
+        chain_checkpoint event (recursion guard); best-effort (all errors
+        swallowed -- timestamping is durability, not correctness)."""
+        interval = getattr(self.config, "timestamp_interval_entries", 0) or 0
+        url = getattr(self.config, "timestamp_authority_url", None)
+        if (interval <= 0 or not url or entry is None
+                or event_type == _CHAIN_CHECKPOINT_EVENT_TYPE):
+            return
+        if (entry.seq + 1) % interval != 0:
+            return
+        try:
+            from cloakllm.timestamping import request_timestamp
+            digest = bytes.fromhex(entry.entry_hash)
+            tok = request_timestamp(url, digest, "sha256")
+            self.log(
+                event_type=_CHAIN_CHECKPOINT_EVENT_TYPE,
+                checkpoint_context={
+                    "stamped_entry_hash": entry.entry_hash,
+                    "tsa_url": url,
+                    "tst_token_b64": tok,
+                    "hash_algorithm": "sha256",
+                    "stamped_seq": entry.seq,
+                },
+            )
+        except Exception:
+            pass  # best-effort; never break the audit writer on TSA failure
 
     def verify_chain(
         self,

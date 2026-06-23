@@ -889,6 +889,25 @@ class Shield:
                     f"({type(e).__name__}: {e})."
                 ) from e
 
+        # v0.11.0 TS-5: load deployer-supplied TSA trust anchors (PEM) so the
+        # report's checkpoint verification can also confirm the chain-to-anchor.
+        timestamp_trusted_certs = None
+        tc_path = self.config.timestamp_trusted_certs_path
+        if tc_path:
+            try:
+                pem_text = Path(tc_path).read_text(encoding="utf-8")
+                # split a bundle into individual PEM certs
+                import re as _re
+                timestamp_trusted_certs = _re.findall(
+                    r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----",
+                    pem_text, _re.DOTALL,
+                ) or [pem_text]
+            except Exception as e:
+                raise RuntimeError(
+                    f"generate_compliance_report: timestamp_trusted_certs_path "
+                    f"at {tc_path} could not be loaded ({type(e).__name__}: {e})."
+                ) from e
+
         report = build_report(
             audit_entries=entries,
             period=ReportPeriod(from_ts=period_from, to_ts=period_to),
@@ -899,6 +918,7 @@ class Shield:
             revocation_list=revocation_list,
             chain_valid=is_valid,
             chain_anomalies=chain_errors,
+            timestamp_trusted_certs=timestamp_trusted_certs,
         )
 
         # Render + optional write
@@ -970,6 +990,69 @@ class Shield:
                     "mistake. Generate a new keypair, publish a new "
                     "KeyManifest, and update the deployment."
                 )
+
+    def checkpoint(self, tsa_url: Optional[str] = None) -> Optional[dict]:
+        """v0.11.0 TS-3: stamp the audit chain's latest entry_hash at an RFC
+        3161 Time-Stamp Authority and append a chain_checkpoint event.
+
+        One checkpoint proves "every entry up to seq N existed no later than
+        the TSA's genTime" -- by hash-chain induction it covers the whole
+        chain before it. The TSA only ever receives the entry_hash (a hash of
+        a no-PII entry); no content or PII leaves.
+
+        Args:
+            tsa_url: the TSA endpoint. Falls back to
+                ShieldConfig.timestamp_authority_url / CLOAKLLM_TSA_URL.
+
+        Returns:
+            The written checkpoint_context dict, or None when no TSA is
+            configured / there is nothing to stamp (empty chain).
+
+        Raises:
+            RuntimeError on a TSA/network failure (an EXPLICIT checkpoint call
+            surfaces errors; the opt-in auto-cadence swallows them instead).
+        """
+        url = tsa_url or self.config.timestamp_authority_url
+        if not url:
+            return None
+        if not self.config.audit_enabled:
+            return None
+        from cloakllm.audit import GENESIS_HASH
+        # Ensure the audit logger has recovered its chain state from disk
+        # (it is lazy-initialized on first write; checkpoint() may be the
+        # first operation in a fresh process, e.g. the CLI).
+        with self.audit._lock:
+            self.audit._ensure_init()
+        entry_hash = getattr(self.audit, "_prev_hash", GENESIS_HASH)
+        if entry_hash == GENESIS_HASH:
+            return None  # nothing written yet -> nothing to stamp
+        stamped_seq = max(0, getattr(self.audit, "_seq", 1) - 1)
+
+        from cloakllm.timestamping import request_timestamp
+        try:
+            digest = bytes.fromhex(entry_hash)  # entry_hash is sha256 hex
+        except ValueError as e:
+            raise RuntimeError(f"checkpoint: entry_hash is not hex: {e}") from e
+        try:
+            tst_token_b64 = request_timestamp(url, digest, "sha256")
+        except Exception as e:
+            raise RuntimeError(
+                f"checkpoint: TSA request to {url} failed "
+                f"({type(e).__name__}: {e})."
+            ) from e
+
+        checkpoint_context = {
+            "stamped_entry_hash": entry_hash,
+            "tsa_url": url,
+            "tst_token_b64": tst_token_b64,
+            "hash_algorithm": "sha256",
+            "stamped_seq": stamped_seq,
+        }
+        self.audit.log(
+            event_type="chain_checkpoint",
+            checkpoint_context=checkpoint_context,
+        )
+        return checkpoint_context
 
     def record_content_generation(
         self,
