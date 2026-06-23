@@ -80,10 +80,26 @@ PATTERNS: dict[str, tuple[str, str]] = {
         r"ssn",
         r"\b(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}\b"
     ),
-    # Credit card numbers (Visa, MC, Amex, Discover)
+    # Credit card numbers (Visa, MC, Amex, Discover).
+    # v0.11.2: detect SPACE/DASH-grouped forms (how cards are normally written),
+    # not just contiguous digits. Before this, "4111 1111 1111 1111" was missed
+    # by CC and partially eaten by PHONE, leaking the trailing group into the
+    # log. A backreferenced separator (\1 / \2) keeps grouping consistent and
+    # avoids matching arbitrary digit runs. Must precede PHONE (it does) so the
+    # full card span is claimed first via covered_spans.
     "CREDIT_CARD": (
         r"credit_card",
-        r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b"
+        r"(?<!\d)(?:(?:4\d{3}|5[1-5]\d{2}|6011|65\d{2})([ -]?)\d{4}\1\d{4}\1\d{4}"
+        r"|3[47]\d{2}([ -]?)\d{6}\2\d{5})(?!\d)"
+    ),
+    # IBAN — MUST precede PHONE (v0.11.2). In the old order IBAN came AFTER
+    # PHONE, so PHONE's finditer claimed the IBAN digit groups first (via
+    # covered_spans), fragmenting "DE89 3704 0044 0532 0130 00" into PHONE
+    # tokens + a leaked country code. Ordering it before PHONE lets IBAN claim
+    # the whole span. The regex already matches compact + spaced forms.
+    "IBAN": (
+        r"iban",
+        r"\b[A-Z]{2}\d{2}(?:[\s]?[\dA-Z]{4}){2,7}(?:[\s]?[\dA-Z]{1,4})?\b"
     ),
     # Phone numbers (international + US formats)
     # v0.6.1 H1.3: tightened from `(?:\(?\d{2,4}\)?[-.\s]?)?\d{3,4}[-.\s]?\d{3,4}\b`
@@ -97,10 +113,25 @@ PATTERNS: dict[str, tuple[str, str]] = {
         r"phone",
         r"(?<!\d)(?:\+\d{1,3}[-.\s])?(?:\(\d{2,4}\)[-.\s]?|\d{2,4}[-.\s])?\d{3,4}[-.\s]?\d{3,4}(?!\d)"
     ),
-    # IP addresses (IPv4)
+    # IP addresses (IPv4 + IPv6). v0.11.2: IPv6 was entirely undetected before,
+    # so a whole address (e.g. 2001:db8:85a3::8a2e:370:7334) leaked verbatim.
+    # The IPv6 alternation is the standard fully-bounded form (no nested
+    # unbounded quantifiers -> ReDoS-safe), gated by non-word/non-colon
+    # lookarounds so it doesn't grab fragments of other tokens.
     "IP_ADDRESS": (
         r"ip_address",
         r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b"
+        r"|(?<![\w:])(?:"
+        r"(?:[A-Fa-f0-9]{1,4}:){7}[A-Fa-f0-9]{1,4}"
+        r"|(?:[A-Fa-f0-9]{1,4}:){1,7}:"
+        r"|(?:[A-Fa-f0-9]{1,4}:){1,6}:[A-Fa-f0-9]{1,4}"
+        r"|(?:[A-Fa-f0-9]{1,4}:){1,5}(?::[A-Fa-f0-9]{1,4}){1,2}"
+        r"|(?:[A-Fa-f0-9]{1,4}:){1,4}(?::[A-Fa-f0-9]{1,4}){1,3}"
+        r"|(?:[A-Fa-f0-9]{1,4}:){1,3}(?::[A-Fa-f0-9]{1,4}){1,4}"
+        r"|(?:[A-Fa-f0-9]{1,4}:){1,2}(?::[A-Fa-f0-9]{1,4}){1,5}"
+        r"|[A-Fa-f0-9]{1,4}:(?::[A-Fa-f0-9]{1,4}){1,6}"
+        r"|:(?::[A-Fa-f0-9]{1,4}){1,7}"
+        r")(?![\w:])"
     ),
     # API keys / tokens (high-entropy strings, common patterns)
     # v0.6.1 F1: bounded upper at 512 to limit ReDoS exposure. Body now
@@ -120,16 +151,6 @@ PATTERNS: dict[str, tuple[str, str]] = {
     "JWT": (
         r"api_key",
         r"\beyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\b"
-    ),
-    # IBAN (International Bank Account Number)
-    # v0.6.1 H1.3: tightened from `[\s]?[\dA-Z]{4}[\s]?(?:[\dA-Z]{4}[\s]?){2,7}[\dA-Z]{1,4}`
-    # which had trailing-separator ambiguity → catastrophic backtracking on
-    # long alpha-numeric strings. Now: separator moved BEFORE each 4-char
-    # group, eliminating split ambiguity. Matches both compact (DE89370400440532013000)
-    # and spaced (DE89 3704 0044 0532 0130 00) forms.
-    "IBAN": (
-        r"iban",
-        r"\b[A-Z]{2}\d{2}(?:[\s]?[\dA-Z]{4}){2,7}(?:[\s]?[\dA-Z]{1,4})?\b"
     ),
     # Israeli ID number (9 digits)
     "IL_ID": (

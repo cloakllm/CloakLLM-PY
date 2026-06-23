@@ -5,6 +5,24 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.2] - 2026-06-23
+
+**Headline: detection hardening — close real PII leaks found by an honest benchmark.** A new hard, realistic corpus (`benchmarks/corpus_hard.json`) measured *character-level scrub coverage* (the metric the no-PII guarantee actually depends on) and found that on realistic messy text the default detector fully scrubbed only ~77% of PII — with the most sensitive categories leaking. Fixed; FAIR-slice scrub is now ~94%, with **zero partial leaks**.
+
+### Fixed (no-PII-invariant leaks — HIGH)
+- **Spaced / dashed credit cards partially leaked and were mistyped as PHONE.** `"4111 1111 1111 1111"` produced the log line `"[PHONE_0] 1111"` — the trailing card group survived verbatim. The CC regex now matches space/dash-grouped Visa/MC/Amex(4-6-5)/Discover with a back-referenced consistent separator, claims the full span before PHONE, and is correctly typed CREDIT_CARD.
+- **Spaced IBANs leaked fragments.** `"DE89 3704 0044 0532 0130 00"` → `"DE[PHONE_1] [PHONE_0] 00"`. Root cause: IBAN was ordered *after* PHONE, so PHONE claimed its digit groups first. IBAN now precedes PHONE and captures the whole span.
+- **IPv6 addresses were entirely undetected** — a whole address flowed verbatim into the log. `IP_ADDRESS` now matches IPv6 (standard fully-bounded, ReDoS-safe alternation) alongside IPv4.
+
+### Added
+- `benchmarks/corpus_hard.json` + `report_hard.py` (character-level scrub / partial / raw-leak measurement, fair-vs-adversarial slices) + `_gen_hard_corpus.py`. Wired into CI via a FAIR-scrub ≥90% / zero-partial-leak threshold test. 913 → **931** tests (+18 regression cases).
+
+### Known limitations (documented, honest)
+- Non-US national phone formats without an international prefix (e.g. French `06 12 34 56 78`) need locale configuration (`locale="fr"`); the base PHONE pattern stays conservative to avoid false-positive blow-up. Obfuscated PII ("john dot doe at gmail") is out of scope. The PHONE matcher still over-redacts some long digit runs (Pi, PO numbers) — safe direction (over-redaction, not a leak); left unchanged to avoid regressing phone recall.
+
+### Note
+Re-aligned to 0.11.2 (py = js = mcp). 13-digit legacy Visa (obsolete) is no longer matched.
+
 ## [0.11.1] - 2026-06-23
 
 **Headline: trusted-timestamping crypto hardening — OpenSSL-differential verification + DER fuzzing.** A follow-up that raises confidence in the v0.11.0 RFC 3161 verifier *without* an external audit: its accept/reject verdict is now checked against an independent implementation, and its parsing surface is fuzzed.

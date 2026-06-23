@@ -1,0 +1,607 @@
+{
+  "samples": [
+    {
+      "id": "hard_000",
+      "text": "Shoot me a note at first.last+newsletter@sub.example.co.uk when ready.",
+      "entities": [
+        {
+          "start": 19,
+          "end": 58,
+          "category": "EMAIL",
+          "value": "first.last+newsletter@sub.example.co.uk"
+        }
+      ],
+      "tags": [
+        "realistic",
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_001",
+      "text": "From: \"Díaz, María\" <maria.diaz@empresa.es>\nSubject: factura",
+      "entities": [
+        {
+          "start": 21,
+          "end": 42,
+          "category": "EMAIL",
+          "value": "maria.diaz@empresa.es"
+        }
+      ],
+      "tags": [
+        "realistic",
+        "context-embedded"
+      ]
+    },
+    {
+      "id": "hard_002",
+      "text": "user_email='a_b-c.d@mail-server.io'; // config",
+      "entities": [
+        {
+          "start": 12,
+          "end": 34,
+          "category": "EMAIL",
+          "value": "a_b-c.d@mail-server.io"
+        }
+      ],
+      "tags": [
+        "context-embedded",
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_003",
+      "text": "reach me — john dot doe at gmail dot com — thanks",
+      "entities": [
+        {
+          "start": 11,
+          "end": 40,
+          "category": "EMAIL",
+          "value": "john dot doe at gmail dot com"
+        }
+      ],
+      "tags": [
+        "obfuscated"
+      ]
+    },
+    {
+      "id": "hard_004",
+      "text": "Contact: jane[at]example[dot]org",
+      "entities": [
+        {
+          "start": 9,
+          "end": 32,
+          "category": "EMAIL",
+          "value": "jane[at]example[dot]org"
+        }
+      ],
+      "tags": [
+        "obfuscated"
+      ]
+    },
+    {
+      "id": "hard_005",
+      "text": "Two addresses: sales@acme.com and billing@acme.com please cc both.",
+      "entities": [
+        {
+          "start": 15,
+          "end": 29,
+          "category": "EMAIL",
+          "value": "sales@acme.com"
+        },
+        {
+          "start": 34,
+          "end": 50,
+          "category": "EMAIL",
+          "value": "billing@acme.com"
+        }
+      ],
+      "tags": [
+        "realistic",
+        "multi"
+      ]
+    },
+    {
+      "id": "hard_006",
+      "text": "Call me on +44 20 7946 0958 after lunch.",
+      "entities": [
+        {
+          "start": 11,
+          "end": 27,
+          "category": "PHONE",
+          "value": "+44 20 7946 0958"
+        }
+      ],
+      "tags": [
+        "realistic",
+        "multilingual",
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_007",
+      "text": "Mobile: (555) 123-4567 ext. 89",
+      "entities": [
+        {
+          "start": 8,
+          "end": 22,
+          "category": "PHONE",
+          "value": "(555) 123-4567"
+        }
+      ],
+      "tags": [
+        "realistic",
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_008",
+      "text": "tel:+1.415.555.0132",
+      "entities": [
+        {
+          "start": 4,
+          "end": 19,
+          "category": "PHONE",
+          "value": "+1.415.555.0132"
+        }
+      ],
+      "tags": [
+        "format-variant",
+        "context-embedded"
+      ]
+    },
+    {
+      "id": "hard_009",
+      "text": "Mein Handy ist 0151 23456789, ruf einfach an.",
+      "entities": [
+        {
+          "start": 15,
+          "end": 28,
+          "category": "PHONE",
+          "value": "0151 23456789"
+        }
+      ],
+      "tags": [
+        "multilingual"
+      ]
+    },
+    {
+      "id": "hard_010",
+      "text": "ring me five five five, two three four, nine eight seven six",
+      "entities": [
+        {
+          "start": 8,
+          "end": 60,
+          "category": "PHONE",
+          "value": "five five five, two three four, nine eight seven six"
+        }
+      ],
+      "tags": [
+        "obfuscated"
+      ]
+    },
+    {
+      "id": "hard_011",
+      "text": "Numéro: 06 12 34 56 78 (portable)",
+      "entities": [
+        {
+          "start": 8,
+          "end": 22,
+          "category": "PHONE",
+          "value": "06 12 34 56 78"
+        }
+      ],
+      "tags": [
+        "multilingual",
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_012",
+      "text": "SSN on file: 123 45 6789 (no dashes in the form).",
+      "entities": [
+        {
+          "start": 13,
+          "end": 24,
+          "category": "SSN",
+          "value": "123 45 6789"
+        }
+      ],
+      "tags": [
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_013",
+      "text": "the last four of my social are 6789, full is 123-45-6789",
+      "entities": [
+        {
+          "start": 45,
+          "end": 56,
+          "category": "SSN",
+          "value": "123-45-6789"
+        }
+      ],
+      "tags": [
+        "realistic",
+        "context-embedded"
+      ]
+    },
+    {
+      "id": "hard_014",
+      "text": "ssn=123456789 in the legacy export",
+      "entities": [
+        {
+          "start": 4,
+          "end": 13,
+          "category": "SSN",
+          "value": "123456789"
+        }
+      ],
+      "tags": [
+        "format-variant",
+        "context-embedded"
+      ]
+    },
+    {
+      "id": "hard_015",
+      "text": "Card: 4111 1111 1111 1111 exp 12/27 cvv 123",
+      "entities": [
+        {
+          "start": 6,
+          "end": 25,
+          "category": "CREDIT_CARD",
+          "value": "4111 1111 1111 1111"
+        }
+      ],
+      "tags": [
+        "realistic",
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_016",
+      "text": "Amex 3782 822463 10005 declined again",
+      "entities": [
+        {
+          "start": 5,
+          "end": 22,
+          "category": "CREDIT_CARD",
+          "value": "3782 822463 10005"
+        }
+      ],
+      "tags": [
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_017",
+      "text": "charged to 5500-0000-0000-0004 yesterday",
+      "entities": [
+        {
+          "start": 11,
+          "end": 30,
+          "category": "CREDIT_CARD",
+          "value": "5500-0000-0000-0004"
+        }
+      ],
+      "tags": [
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_018",
+      "text": "server logged from 192.168.0.14 and also 2001:0db8:85a3::8a2e:0370:7334",
+      "entities": [
+        {
+          "start": 19,
+          "end": 31,
+          "category": "IP_ADDRESS",
+          "value": "192.168.0.14"
+        },
+        {
+          "start": 41,
+          "end": 71,
+          "category": "IP_ADDRESS",
+          "value": "2001:0db8:85a3::8a2e:0370:7334"
+        }
+      ],
+      "tags": [
+        "context-embedded",
+        "multi",
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_019",
+      "text": "export OPENAI_API_KEY=sk-proj-abc123DEF456ghi789JKL012mno345PQ",
+      "entities": [
+        {
+          "start": 22,
+          "end": 62,
+          "category": "API_KEY",
+          "value": "sk-proj-abc123DEF456ghi789JKL012mno345PQ"
+        }
+      ],
+      "tags": [
+        "context-embedded"
+      ]
+    },
+    {
+      "id": "hard_020",
+      "text": "AWS creds leaked: AKIAIOSFODNN7EXAMPLE / secret hidden",
+      "entities": [
+        {
+          "start": 18,
+          "end": 38,
+          "category": "AWS_KEY",
+          "value": "AKIAIOSFODNN7EXAMPLE"
+        }
+      ],
+      "tags": [
+        "context-embedded"
+      ]
+    },
+    {
+      "id": "hard_021",
+      "text": "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N",
+      "entities": [
+        {
+          "start": 22,
+          "end": 109,
+          "category": "JWT",
+          "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N"
+        }
+      ],
+      "tags": [
+        "context-embedded"
+      ]
+    },
+    {
+      "id": "hard_022",
+      "text": "Please wire to DE89 3704 0044 0532 0130 00 by Friday.",
+      "entities": [
+        {
+          "start": 15,
+          "end": 42,
+          "category": "IBAN",
+          "value": "DE89 3704 0044 0532 0130 00"
+        }
+      ],
+      "tags": [
+        "realistic",
+        "multilingual"
+      ]
+    },
+    {
+      "id": "hard_023",
+      "text": "IBAN GB29 NWBK 6016 1331 9268 19 for the refund",
+      "entities": [
+        {
+          "start": 5,
+          "end": 32,
+          "category": "IBAN",
+          "value": "GB29 NWBK 6016 1331 9268 19"
+        }
+      ],
+      "tags": [
+        "multilingual",
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_024",
+      "text": "Compte: FR1420041010050500013M02606",
+      "entities": [
+        {
+          "start": 8,
+          "end": 35,
+          "category": "IBAN",
+          "value": "FR1420041010050500013M02606"
+        }
+      ],
+      "tags": [
+        "multilingual",
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_025",
+      "text": "Hi, it's sarah from accounting, can you resend the invoice?",
+      "entities": [
+        {
+          "start": 9,
+          "end": 14,
+          "category": "PERSON",
+          "value": "sarah"
+        }
+      ],
+      "tags": [
+        "realistic",
+        "obfuscated"
+      ]
+    },
+    {
+      "id": "hard_026",
+      "text": "Dr. Emily Carter signed off on the procedure.",
+      "entities": [
+        {
+          "start": 4,
+          "end": 16,
+          "category": "PERSON",
+          "value": "Emily Carter"
+        }
+      ],
+      "tags": [
+        "realistic"
+      ]
+    },
+    {
+      "id": "hard_027",
+      "text": "escalate to Raj Patel and Wei Zhang on the oncall rota",
+      "entities": [
+        {
+          "start": 12,
+          "end": 21,
+          "category": "PERSON",
+          "value": "Raj Patel"
+        },
+        {
+          "start": 26,
+          "end": 35,
+          "category": "PERSON",
+          "value": "Wei Zhang"
+        }
+      ],
+      "tags": [
+        "realistic",
+        "multi",
+        "multilingual"
+      ]
+    },
+    {
+      "id": "hard_028",
+      "text": "Approved by François Lefèvre per the contract.",
+      "entities": [
+        {
+          "start": 12,
+          "end": 28,
+          "category": "PERSON",
+          "value": "François Lefèvre"
+        }
+      ],
+      "tags": [
+        "multilingual"
+      ]
+    },
+    {
+      "id": "hard_029",
+      "text": "ping @msmith but cc Margaret Smith on the legal thread",
+      "entities": [
+        {
+          "start": 20,
+          "end": 34,
+          "category": "PERSON",
+          "value": "Margaret Smith"
+        }
+      ],
+      "tags": [
+        "realistic"
+      ]
+    },
+    {
+      "id": "hard_030",
+      "text": "Patient: Nguyen Van An, room 4B",
+      "entities": [
+        {
+          "start": 9,
+          "end": 22,
+          "category": "PERSON",
+          "value": "Nguyen Van An"
+        }
+      ],
+      "tags": [
+        "multilingual",
+        "context-embedded"
+      ]
+    },
+    {
+      "id": "hard_031",
+      "text": "She moved from Acme Corp to Globex before relocating to Lyon.",
+      "entities": [
+        {
+          "start": 15,
+          "end": 24,
+          "category": "ORG",
+          "value": "Acme Corp"
+        },
+        {
+          "start": 28,
+          "end": 34,
+          "category": "ORG",
+          "value": "Globex"
+        },
+        {
+          "start": 56,
+          "end": 60,
+          "category": "GPE",
+          "value": "Lyon"
+        }
+      ],
+      "tags": [
+        "realistic",
+        "multi"
+      ]
+    },
+    {
+      "id": "hard_032",
+      "text": "Our Berlin office handles all EU requests.",
+      "entities": [
+        {
+          "start": 4,
+          "end": 10,
+          "category": "GPE",
+          "value": "Berlin"
+        }
+      ],
+      "tags": [
+        "realistic"
+      ]
+    },
+    {
+      "id": "hard_033",
+      "text": "Order #123-45-6789 shipped; tracking 1Z999AA10123456784.",
+      "entities": [],
+      "tags": [
+        "hard-negative"
+      ]
+    },
+    {
+      "id": "hard_034",
+      "text": "Build 4.11.1.1192 deployed to 10 nodes; commit a1b2c3d4e5f6.",
+      "entities": [],
+      "tags": [
+        "hard-negative"
+      ]
+    },
+    {
+      "id": "hard_035",
+      "text": "The UUID is 550e8400-e29b-41d4-a716-446655440000 (not secret).",
+      "entities": [],
+      "tags": [
+        "hard-negative"
+      ]
+    },
+    {
+      "id": "hard_036",
+      "text": "ISBN 978-3-16-148410-0 and SKU 4111111111111111-RED in stock.",
+      "entities": [],
+      "tags": [
+        "hard-negative"
+      ]
+    },
+    {
+      "id": "hard_037",
+      "text": "Meeting at 192 Main St, room 168, from 9:00 to 17:30.",
+      "entities": [],
+      "tags": [
+        "hard-negative"
+      ]
+    },
+    {
+      "id": "hard_038",
+      "text": "Pi is 3.14159265 and the ratio was 16:9 on screen 2560x1440.",
+      "entities": [],
+      "tags": [
+        "hard-negative"
+      ]
+    },
+    {
+      "id": "hard_039",
+      "text": "Invoice total $4,111.11; PO 1111-1111-1111-1111 internal ref only.",
+      "entities": [],
+      "tags": [
+        "hard-negative"
+      ]
+    }
+  ]
+}
