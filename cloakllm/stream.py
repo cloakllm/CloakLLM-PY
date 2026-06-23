@@ -71,6 +71,20 @@ class StreamDesanitizer:
         )
         return self.chars_processed
 
+    # v0.11.5: the stream must buffer BOTH the ASCII token brackets ([ ]) and
+    # the FULLWIDTH escaped brackets (U+FF3B / U+FF3D) across chunk boundaries.
+    # Batch desanitize runs _unescape over the whole text, converting every
+    # full-width [...] back to ASCII; if the stream emits a fullwidth bracket
+    # before its partner arrives, _unescape (run per-feed) never sees the whole
+    # sequence and it leaks through fullwidth. Hold both forms until complete.
+    _OPEN = ("[", "［")
+    _CLOSE = ("]", "］")
+
+    @staticmethod
+    def _find_first(s: str, chars: tuple) -> int:
+        positions = [p for p in (s.find(c) for c in chars) if p != -1]
+        return min(positions) if positions else -1
+
     @staticmethod
     def _unescape(text: str) -> str:
         """Restore fullwidth brackets back to ASCII brackets."""
@@ -103,7 +117,7 @@ class StreamDesanitizer:
         self._buffer += chunk
 
         while self._buffer:
-            bracket_pos = self._buffer.find("[")
+            bracket_pos = self._find_first(self._buffer, self._OPEN)
 
             if bracket_pos == -1:
                 output_parts.append(self._buffer)
@@ -114,7 +128,7 @@ class StreamDesanitizer:
                 output_parts.append(self._buffer[:bracket_pos])
                 self._buffer = self._buffer[bracket_pos:]
 
-            close_pos = self._buffer.find("]")
+            close_pos = self._find_first(self._buffer, self._CLOSE)
 
             if close_pos == -1:
                 if len(self._buffer) > _MAX_TOKEN_LEN:

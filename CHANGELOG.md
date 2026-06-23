@@ -5,6 +5,11 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **StreamDesanitizer fidelity** (LOW — cosmetic, no PII leak): streamed desanitize now byte-equals batch desanitize for *every* chunking. Previously, when the user's own text contained a literal `[CATEGORY_N]`-style token, sanitize escaped it to fullwidth brackets (`［…］`) and the stream emitted the escaped sequence in fragments, so `_unescape` never saw a whole `［…］` to convert back — leaking the fullwidth form instead of restoring `[…]`. Token-injection prevention held in both paths (the escaped literal is never replaced with PII), so this was fidelity-only. The stream now buffers fullwidth brackets across chunk boundaries too. Regression-guarded by a streaming-vs-batch fuzz (`tests/test_stream_fuzz.py`). Rides the next version bump.
+
 ## [0.11.4] - 2026-06-23
 
 **Headline: SECURITY — sanitize PII in tool-call arguments (outbound leak fix).** A middleware probe found that `_sanitize_messages` sanitized only message `content`, so PII inside `assistant.tool_calls[].function.arguments` (and the legacy `function_call.arguments`) reached the LLM provider VERBATIM in multi-turn tool-use / agentic history. Fixed across all middleware.
