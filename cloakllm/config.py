@@ -129,6 +129,14 @@ class ShieldConfig:
             "EMAIL", "PHONE",
         }
     )
+    # v0.11.3: if True, an unavailable/broken spaCy NER backend is a HARD error
+    # (RuntimeError) instead of degrading to regex-only. Default False: NER is a
+    # best-effort enrichment pass; if spaCy can't load, regex detection still
+    # runs and a LOUD warning is emitted (PERSON/ORG/GPE may be missed). Set
+    # True for deployments that depend on NER coverage. Env: CLOAKLLM_NER_REQUIRED.
+    ner_required: bool = field(
+        default_factory=lambda: os.getenv("CLOAKLLM_NER_REQUIRED", "false").lower() == "true"
+    )
     # Enable/disable regex-based detection
     detect_emails: bool = True
     detect_phones: bool = True

@@ -5,6 +5,20 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.3] - 2026-06-23
+
+**Headline: graceful NER degradation — a broken/absent spaCy no longer takes down `sanitize()`.** A resilience fix found during v0.11.2 Step 7 (a clean venv had spaCy installed but broken — missing a transitive `click` dep). NER is a best-effort enrichment pass; a degraded environment must not disable the PII protection that regex still provides.
+
+### Fixed
+- `NerBackend` now degrades to **regex-only** (with a LOUD one-time warning that PERSON/ORG/GPE may be missed) when spaCy is absent OR broken (`ImportError`/`ModuleNotFoundError` — e.g. a partial install missing a transitive dependency, or a corrupt model), instead of raising out of `sanitize()`. The model-missing case already degraded; this closes the import-failure path. Now matches the JS SDK's fail-open behavior.
+
+### Added
+- `ShieldConfig.ner_required` (env `CLOAKLLM_NER_REQUIRED`, default `False`) — set `True` to keep the hard-fail (`RuntimeError`) for deployments that depend on NER coverage. Mirrored in JS as `nerRequired`.
+- Regression tests simulating a broken spaCy import (both SDKs).
+
+### Note
+Re-aligned to 0.11.3 (py = js = mcp). The default-behavior change only affects degraded environments (working installs are unchanged); fail-open is the safe default for availability, fail-closed via `ner_required`.
+
 ## [0.11.2] - 2026-06-23
 
 **Headline: detection hardening — close real PII leaks found by an honest benchmark.** A new hard, realistic corpus (`benchmarks/corpus_hard.json`) measured *character-level scrub coverage* (the metric the no-PII guarantee actually depends on) and found that on realistic messy text the default detector fully scrubbed only ~77% of PII — with the most sensitive categories leaking. Fixed; FAIR-slice scrub is now ~94%, with **zero partial leaks**.

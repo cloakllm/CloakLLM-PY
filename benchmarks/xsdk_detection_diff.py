@@ -26,7 +26,7 @@ from cloakllm import Shield, ShieldConfig
 SHARED_CATS = {"EMAIL", "SSN", "CREDIT_CARD", "PHONE", "IP_ADDRESS",
                "API_KEY", "AWS_KEY", "JWT", "IBAN"}
 _HERE = Path(__file__).resolve().parent
-_JS_DUMP = _HERE.parents[1] / "cloakllm-js" / "test" / "_xsdk_dump.js"
+_JS_DUMP = _HERE.parents[1] / "cloakllm-js" / "tools" / "_xsdk_dump.js"
 
 # adversarial structures on top of the two committed corpora
 EXTRA = [
