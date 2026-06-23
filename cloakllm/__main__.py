@@ -40,10 +40,10 @@ def cmd_scan(args):
     analysis = shield.analyze(text, redact_values=not show_pii)
 
     if not analysis["entities"]:
-        print("✅ No sensitive entities detected.")
+        print("[OK] No sensitive entities detected.")
         return
 
-    print(f"⚠️  Found {analysis['entity_count']} sensitive entities:\n")
+    print(f"[!] Found {analysis['entity_count']} sensitive entities:\n")
 
     for ent in analysis["entities"]:
         display = ent['text'] if show_pii else "***"
@@ -53,22 +53,22 @@ def cmd_scan(args):
 
     # Show sanitized version
     sanitized, token_map = shield.sanitize(text)
-    print(f"\n{'─' * 60}")
+    print(f"\n{'-' * 60}")
     if show_pii:
         print(f"ORIGINAL:  {text}")
     else:
         print(f"ORIGINAL:  [use --show-pii to display]")
     print(f"SANITIZED: {sanitized}")
-    print(f"{'─' * 60}")
+    print(f"{'-' * 60}")
     print(f"\nToken map ({token_map.entity_count} entities):")
     for token, original in token_map.reverse.items():
         display = original if show_pii else "***"
-        print(f"  {token} → \"{display}\"")
+        print(f"  {token} -> \"{display}\"")
 
     # Context risk analysis (opt-in)
     if getattr(args, "context_risk", False):
         risk = shield.analyze_context_risk(sanitized)
-        print(f"\n{'─' * 60}")
+        print(f"\n{'-' * 60}")
         print(f"CONTEXT RISK: {risk['risk_level'].upper()} (score: {risk['risk_score']:.3f})")
         print(f"  Token density: {risk['token_density']:.3f}")
         print(f"  Identifying descriptors: {risk['identifying_descriptors']}")
@@ -87,7 +87,7 @@ def cmd_verify(args):
     _warn_if_outside_cwd(args.log_dir)
     log_dir = Path(args.log_dir)
     if not log_dir.exists():
-        print(f"❌ Log directory not found: {log_dir}")
+        print(f"[ERROR] Log directory not found: {log_dir}")
         sys.exit(1)
 
     config = ShieldConfig(log_dir=log_dir)

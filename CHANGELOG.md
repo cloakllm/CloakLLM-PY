@@ -5,6 +5,20 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.4] - 2026-06-23
+
+**Headline: SECURITY — sanitize PII in tool-call arguments (outbound leak fix).** A middleware probe found that `_sanitize_messages` sanitized only message `content`, so PII inside `assistant.tool_calls[].function.arguments` (and the legacy `function_call.arguments`) reached the LLM provider VERBATIM in multi-turn tool-use / agentic history. Fixed across all middleware.
+
+### Fixed (no-PII-to-provider leak — HIGH)
+- **Tool-call arguments are now sanitized outbound and restored inbound** in the OpenAI and LiteLLM middleware (sync + async, all choices). Message `content` and tool-result content were already covered; this closes the `tool_calls[].function.arguments` / `function_call.arguments` gap. Multi-choice desanitize was already correct (no pop-once regression) and stays so.
+- **`enable()` / `disable()` no longer crash on non-UTF-8 consoles.** The `🛡️` emoji banner threw `UnicodeEncodeError` on cp1255 (Hebrew Windows) / cp932 (Japanese), so `enable_openai()` crashed on setup. All SDK stdout banners + CLI output (`scan` / `verify`) are now ASCII-only. (AUDIT-6 extended: the ASCII rule applies to all `print()`, not just error strings.)
+
+### Tests
+- New tool-call middleware regression tests: PII in tool_call args is stripped before the provider; restored in every choice; banner is ASCII. 948 → **951**.
+
+### Note
+Re-aligned to 0.11.4 (py = js = mcp). The JS OpenAI middleware and the Vercel middleware (tool-call `args` + tool-result `result`, via JSON round-trip) are covered too.
+
 ## [0.11.3] - 2026-06-23
 
 **Headline: graceful NER degradation — a broken/absent spaCy no longer takes down `sanitize()`.** A resilience fix found during v0.11.2 Step 7 (a clean venv had spaCy installed but broken — missing a transitive `click` dep). NER is a best-effort enrichment pass; a degraded environment must not disable the PII protection that regex still provides.

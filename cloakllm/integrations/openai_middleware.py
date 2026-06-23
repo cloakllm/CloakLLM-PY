@@ -70,8 +70,17 @@ def _sanitize_messages(messages: list[dict], model: str) -> tuple[list[dict], st
     call_key = str(uuid.uuid4())
     token_map: Optional[TokenMap] = None
 
+    def _san(text: str):
+        nonlocal token_map
+        out, token_map = _shield.sanitize(
+            text=text, token_map=token_map, model=model,
+            metadata={"role": "tool_call"},
+        )
+        return out
+
     sanitized_messages = []
     for msg in messages:
+        new_msg = dict(msg)
         content = msg.get("content", "")
         if isinstance(content, str) and content.strip():
             sanitized_content, token_map = _shield.sanitize(
@@ -80,7 +89,7 @@ def _sanitize_messages(messages: list[dict], model: str) -> tuple[list[dict], st
                 model=model,
                 metadata={"role": msg.get("role", "unknown")},
             )
-            sanitized_messages.append({**msg, "content": sanitized_content})
+            new_msg["content"] = sanitized_content
         elif isinstance(content, list):
             sanitized_parts = []
             for part in content:
@@ -93,9 +102,26 @@ def _sanitize_messages(messages: list[dict], model: str) -> tuple[list[dict], st
                     sanitized_parts.append({**part, "text": sanitized_text})
                 else:
                     sanitized_parts.append(part)
-            sanitized_messages.append({**msg, "content": sanitized_parts})
-        else:
-            sanitized_messages.append(msg)
+            new_msg["content"] = sanitized_parts
+
+        # v0.11.4: tool-call arguments (a JSON string) bypass `content` and would
+        # otherwise reach the provider RAW in multi-turn tool-use history. Sanitize
+        # them (and the legacy function_call) with the same token map.
+        tcs = msg.get("tool_calls")
+        if isinstance(tcs, list):
+            new_tcs = []
+            for tc in tcs:
+                fn = tc.get("function") if isinstance(tc, dict) else None
+                if isinstance(fn, dict) and isinstance(fn.get("arguments"), str) and fn["arguments"].strip():
+                    new_tcs.append({**tc, "function": {**fn, "arguments": _san(fn["arguments"])}})
+                else:
+                    new_tcs.append(tc)
+            new_msg["tool_calls"] = new_tcs
+        fc = msg.get("function_call")  # legacy single function_call
+        if isinstance(fc, dict) and isinstance(fc.get("arguments"), str) and fc["arguments"].strip():
+            new_msg["function_call"] = {**fc, "arguments": _san(fc["arguments"])}
+
+        sanitized_messages.append(new_msg)
 
     # Inject system hint so the LLM treats sanitized tokens as real values
     if token_map is not None and token_map.entity_count > 0:
@@ -130,6 +156,29 @@ def _desanitize_response(response_text: str, model: str, call_key: str) -> str:
         token_map=token_map,
         model=model,
     )
+
+
+def _desanitize_choices(choices, token_map, model, shield) -> None:
+    """v0.11.4: in-place desanitize each choice's message content AND tool-call
+    arguments. Tool-call args are the inbound mirror of the outbound fix — if the
+    model echoes tokens inside a tool call, restore them for the caller."""
+    for choice in choices:
+        message = getattr(choice, "message", None)
+        if message is None:
+            continue
+        if getattr(message, "content", None):
+            message.content = shield.desanitize(
+                text=message.content, token_map=token_map, model=model,
+            )
+        for tc in (getattr(message, "tool_calls", None) or []):
+            fn = getattr(tc, "function", None)
+            args = getattr(fn, "arguments", None) if fn is not None else None
+            if isinstance(args, str) and args:
+                fn.arguments = shield.desanitize(text=args, token_map=token_map, model=model)
+        fc = getattr(message, "function_call", None)
+        fc_args = getattr(fc, "arguments", None) if fc is not None else None
+        if isinstance(fc_args, str) and fc_args:
+            fc.arguments = shield.desanitize(text=fc_args, token_map=token_map, model=model)
 
 
 def _should_skip(model: str) -> bool:
@@ -209,14 +258,7 @@ def enable(client: Any, config: Optional[ShieldConfig] = None):
                         token_map = _active_maps.pop(call_key, None)
                     call_key = ""  # consumed — cleanup handled above
                     if token_map and token_map.entity_count > 0:
-                        for choice in response.choices:
-                            if hasattr(choice, "message") and hasattr(choice.message, "content"):
-                                if choice.message.content:
-                                    choice.message.content = _shield.desanitize(
-                                        text=choice.message.content,
-                                        token_map=token_map,
-                                        model=model,
-                                    )
+                        _desanitize_choices(response.choices, token_map, model, _shield)
 
                 return response
             finally:
@@ -256,14 +298,7 @@ def enable(client: Any, config: Optional[ShieldConfig] = None):
                         token_map = _active_maps.pop(call_key, None)
                     call_key = ""  # consumed — cleanup handled above
                     if token_map and token_map.entity_count > 0:
-                        for choice in response.choices:
-                            if hasattr(choice, "message") and hasattr(choice.message, "content"):
-                                if choice.message.content:
-                                    choice.message.content = _shield.desanitize(
-                                        text=choice.message.content,
-                                        token_map=token_map,
-                                        model=model,
-                                    )
+                        _desanitize_choices(response.choices, token_map, model, _shield)
 
                 return response
             finally:
@@ -278,7 +313,7 @@ def enable(client: Any, config: Optional[ShieldConfig] = None):
         metadata={"integration": "openai"},
     )
 
-    print("🛡️  CloakLLM enabled — detecting PII across OpenAI calls")
+    print("CloakLLM enabled - detecting PII across OpenAI calls")
     print(f"   Audit logs: {_shield.config.log_dir.absolute()}")
 
 

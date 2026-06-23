@@ -65,8 +65,17 @@ def _sanitize_messages(messages: list[dict], model: str) -> tuple[list[dict], st
     call_key = str(uuid.uuid4())
     token_map: Optional[TokenMap] = None
 
+    def _san(text: str):
+        nonlocal token_map
+        out, token_map = _shield.sanitize(
+            text=text, token_map=token_map, model=model,
+            metadata={"role": "tool_call"},
+        )
+        return out
+
     sanitized_messages = []
     for msg in messages:
+        new_msg = dict(msg)
         content = msg.get("content", "")
         if isinstance(content, str) and content.strip():
             sanitized_content, token_map = _shield.sanitize(
@@ -75,7 +84,7 @@ def _sanitize_messages(messages: list[dict], model: str) -> tuple[list[dict], st
                 model=model,
                 metadata={"role": msg.get("role", "unknown")},
             )
-            sanitized_messages.append({**msg, "content": sanitized_content})
+            new_msg["content"] = sanitized_content
         elif isinstance(content, list):
             # Handle multimodal content (list of text/image blocks)
             sanitized_parts = []
@@ -89,9 +98,25 @@ def _sanitize_messages(messages: list[dict], model: str) -> tuple[list[dict], st
                     sanitized_parts.append({**part, "text": sanitized_text})
                 else:
                     sanitized_parts.append(part)
-            sanitized_messages.append({**msg, "content": sanitized_parts})
-        else:
-            sanitized_messages.append(msg)
+            new_msg["content"] = sanitized_parts
+
+        # v0.11.4: tool-call arguments (JSON string) bypass `content` and would
+        # otherwise reach the provider RAW in multi-turn tool-use history.
+        tcs = msg.get("tool_calls")
+        if isinstance(tcs, list):
+            new_tcs = []
+            for tc in tcs:
+                fn = tc.get("function") if isinstance(tc, dict) else None
+                if isinstance(fn, dict) and isinstance(fn.get("arguments"), str) and fn["arguments"].strip():
+                    new_tcs.append({**tc, "function": {**fn, "arguments": _san(fn["arguments"])}})
+                else:
+                    new_tcs.append(tc)
+            new_msg["tool_calls"] = new_tcs
+        fc = msg.get("function_call")  # legacy
+        if isinstance(fc, dict) and isinstance(fc.get("arguments"), str) and fc["arguments"].strip():
+            new_msg["function_call"] = {**fc, "arguments": _san(fc["arguments"])}
+
+        sanitized_messages.append(new_msg)
 
     # Inject system hint so the LLM treats sanitized tokens as real values
     if token_map is not None and token_map.entity_count > 0:
@@ -114,6 +139,26 @@ def _pop_token_map(call_key: str) -> Optional[TokenMap]:
     """Retrieve and remove the stored token map for a call."""
     with _maps_lock:
         return _active_maps.pop(call_key, None)
+
+
+def _desanitize_choices(choices, token_map, model) -> None:
+    """v0.11.4: in-place desanitize each choice's content AND tool-call
+    arguments (the inbound mirror of the outbound tool-call fix)."""
+    for choice in choices:
+        message = getattr(choice, "message", None)
+        if message is None:
+            continue
+        if getattr(message, "content", None):
+            message.content = _shield.desanitize(message.content, token_map, model=model)
+        for tc in (getattr(message, "tool_calls", None) or []):
+            fn = getattr(tc, "function", None)
+            args = getattr(fn, "arguments", None) if fn is not None else None
+            if isinstance(args, str) and args:
+                fn.arguments = _shield.desanitize(args, token_map, model=model)
+        fc = getattr(message, "function_call", None)
+        fc_args = getattr(fc, "arguments", None) if fc is not None else None
+        if isinstance(fc_args, str) and fc_args:
+            fc.arguments = _shield.desanitize(fc_args, token_map, model=model)
 
 
 def _should_skip(model: str) -> bool:
@@ -186,12 +231,7 @@ def enable(config: Optional[ShieldConfig] = None):
                 token_map = _pop_token_map(call_key)
                 call_key = ""  # consumed — skip finally cleanup
                 if token_map and token_map.entity_count > 0:
-                    for choice in response.choices:
-                        if hasattr(choice, "message") and hasattr(choice.message, "content"):
-                            if choice.message.content:
-                                choice.message.content = _shield.desanitize(
-                                    choice.message.content, token_map, model=model
-                                )
+                    _desanitize_choices(response.choices, token_map, model)
 
             return response
         finally:
@@ -226,12 +266,7 @@ def enable(config: Optional[ShieldConfig] = None):
                 token_map = _pop_token_map(call_key)
                 call_key = ""  # consumed — skip finally cleanup
                 if token_map and token_map.entity_count > 0:
-                    for choice in response.choices:
-                        if hasattr(choice, "message") and hasattr(choice.message, "content"):
-                            if choice.message.content:
-                                choice.message.content = _shield.desanitize(
-                                    choice.message.content, token_map, model=model
-                                )
+                    _desanitize_choices(response.choices, token_map, model)
 
             return response
         finally:
@@ -250,7 +285,7 @@ def enable(config: Optional[ShieldConfig] = None):
         metadata={"spacy_model": _shield.config.spacy_model},
     )
 
-    print(f"🛡️  CloakLLM enabled — detecting PII across all LiteLLM calls")
+    print("CloakLLM enabled - detecting PII across all LiteLLM calls")
     print(f"   Audit logs: {_shield.config.log_dir.absolute()}")
 
 
@@ -283,7 +318,7 @@ def disable():
     with _maps_lock:
         _active_maps.clear()
 
-    print("🛡️  CloakLLM disabled")
+    print("CloakLLM disabled")
 
 
 import logging as _logging
