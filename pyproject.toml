@@ -39,7 +39,7 @@ litellm = [
 attestation = ["pynacl>=1.5.0,<2.0.0"]
 # v0.8.0 CR8-4: PDF compliance reports via reportlab. Optional extra so the
 # core install stays lean; PDF is regulator-facing tooling, not core SDK.
-reporting = ["reportlab>=4.0,<5.0"]
+reporting = ["reportlab>=4.0,<6.0"]
 # v0.11.0 TS-2: RFC 3161 trusted timestamping. asn1crypto for ASN.1 build/parse
 # (pure-Python, no compiled deps); cryptography for token signature + cert
 # verification. Optional so the core install stays lean -- timestamping is
