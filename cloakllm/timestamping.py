@@ -303,6 +303,76 @@ def verify_timestamp_token(
             sig_ok = False
         if not sig_ok:
             return _fail("CMS signature verification failed", gen_time, mi=True)
+
+        # --- v0.11.1: ESS signing-certificate attribute (RFC 3161 sec 2.4.1 /
+        # RFC 5035 / RFC 5816). A conforming TSA MUST bind its signing cert into
+        # signerInfo via SigningCertificateV2 (legacy: SigningCertificate); it
+        # closes a cert-substitution surface and OpenSSL enforces it. Require +
+        # verify so we accept exactly what a conforming verifier accepts.
+        # asn1crypto ships no ESS specs, so define minimal ones + match by OID. ---
+        from asn1crypto import core as _core, algos as _algos
+        _ESS_V2_OID = "1.2.840.113549.1.9.16.2.47"   # id-aa-signingCertificateV2
+        _ESS_V1_OID = "1.2.840.113549.1.9.16.2.12"   # id-aa-signingCertificate
+
+        class _ESSCertIDv2(_core.Sequence):
+            _fields = [
+                ("hash_algorithm", _algos.DigestAlgorithm, {"optional": True}),
+                ("cert_hash", _core.OctetString),
+                ("issuer_serial", _core.Any, {"optional": True}),
+            ]
+
+        class _ESSCertIDv2s(_core.SequenceOf):
+            _child_spec = _ESSCertIDv2
+
+        class _SigningCertificateV2(_core.Sequence):
+            _fields = [("certs", _ESSCertIDv2s),
+                       ("policies", _core.Any, {"optional": True})]
+
+        class _ESSCertID(_core.Sequence):
+            _fields = [("cert_hash", _core.OctetString),
+                       ("issuer_serial", _core.Any, {"optional": True})]
+
+        class _ESSCertIDs(_core.SequenceOf):
+            _child_spec = _ESSCertID
+
+        class _SigningCertificate(_core.Sequence):
+            _fields = [("certs", _ESSCertIDs),
+                       ("policies", _core.Any, {"optional": True})]
+
+        ess_raw = None
+        ess_v2 = False
+        for attr in signed_attrs:
+            dotted = attr["type"].dotted
+            if dotted == _ESS_V2_OID:
+                ess_raw, ess_v2 = attr["values"][0], True
+                break
+            if dotted == _ESS_V1_OID:
+                ess_raw, ess_v2 = attr["values"][0], False
+                break
+        if ess_raw is None:
+            return _fail("token lacks the ESS signing-certificate attribute "
+                         "(RFC 3161 sec 2.4.1)", gen_time, mi=True, sig=True)
+        try:
+            spec = _SigningCertificateV2 if ess_v2 else _SigningCertificate
+            sc = spec.load(ess_raw.dump())
+            cert_id = sc["certs"][0]
+            ess_hash = cert_id["cert_hash"].native
+            if ess_v2:
+                ha = cert_id["hash_algorithm"]
+                algo_name = ("sha256" if isinstance(ha, _core.Void)
+                             else ha["algorithm"].native)
+                efn = algo_map.get(algo_name)
+            else:
+                efn = hashlib.sha1  # ESSCertID (v1) is always SHA-1
+            if efn is None:
+                return _fail("ESS uses an unsupported hash algorithm",
+                             gen_time, mi=True, sig=True)
+            if not _hmac.compare_digest(efn(signer_cert_der).digest(), ess_hash):
+                return _fail("ESS signing-certificate hash does not match the "
+                             "signer cert", gen_time, mi=True, sig=True)
+        except (KeyError, IndexError, TypeError, ValueError):
+            return _fail("malformed ESS signing-certificate attribute",
+                         gen_time, mi=True, sig=True)
     except Exception as e:
         return _fail(f"signature check error: {type(e).__name__}", gen_time, mi=True)
 

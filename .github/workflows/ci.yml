@@ -36,7 +36,10 @@ jobs:
         run: pip install --upgrade pip
 
       - name: Install dependencies
-        run: pip install -e ".[dev,litellm]"
+        # timestamping: installs asn1crypto so the RFC 3161 verifier tests +
+        # the OpenSSL-differential suite actually RUN in CI (not skip). openssl
+        # ships on GitHub runners.
+        run: pip install -e ".[dev,litellm,timestamping]"
 
       - name: Download spaCy model
         run: python -m spacy download en_core_web_sm

@@ -260,3 +260,119 @@ class TestSignerCertHardening:
         r = verify_timestamp_token(_FIX["no_eku_token_b64"], _digest(),
                                    trusted_certs_pem=[_FIX["tsa_ca_cert_pem"]])
         assert not r.valid and "timeStamping" in r.reason
+
+
+# --- v0.11.1: ESS signing-certificate attribute (RFC 3161 sec 2.4.1) ---
+
+class TestEssSigningCert:
+    def test_missing_ess_rejected(self):
+        from cloakllm.timestamping import verify_timestamp_token
+        if "no_ess_token_b64" not in _FIX:
+            import pytest as _p; _p.skip("fixture lacks no-ess token")
+        r = verify_timestamp_token(_FIX["no_ess_token_b64"], _digest(),
+                                   trusted_certs_pem=[_FIX["tsa_ca_cert_pem"]])
+        assert not r.valid and "ESS signing-certificate" in r.reason
+
+    def test_wrong_ess_binding_rejected(self):
+        from cloakllm.timestamping import verify_timestamp_token
+        if "wrong_ess_token_b64" not in _FIX:
+            import pytest as _p; _p.skip("fixture lacks wrong-ess token")
+        r = verify_timestamp_token(_FIX["wrong_ess_token_b64"], _digest(),
+                                   trusted_certs_pem=[_FIX["tsa_ca_cert_pem"]])
+        assert not r.valid and "does not match the signer cert" in r.reason
+
+    def test_real_freetsa_token_has_ess_and_verifies(self):
+        from cloakllm.timestamping import verify_timestamp_token
+        if "freetsa_token_b64" not in _FIX:
+            import pytest as _p; _p.skip("fixture lacks real freetsa token")
+        r = verify_timestamp_token(_FIX["freetsa_token_b64"],
+                                   bytes.fromhex(_FIX["freetsa_digest_hex"]),
+                                   trusted_certs_pem=[_FIX["freetsa_ca_pem"]])
+        assert r.valid and r.chain_valid is True
+
+
+# --- v0.11.1: OpenSSL-differential. Our verifier's accept/reject verdict MUST
+# match `openssl ts -verify` across the committed corpus. This is independent-
+# implementation corroboration (the strongest signal short of a formal audit).
+# Skipped if openssl is not on PATH; REQUIRED in CI (runners ship openssl). ---
+
+import shutil  # noqa: E402
+
+_OPENSSL = shutil.which("openssl")
+
+
+@pytest.mark.skipif(_OPENSSL is None, reason="openssl not on PATH")
+class TestOpenSSLDifferential:
+    def _openssl_accepts(self, tmp_path, der: bytes, digest_hex: str, ca_pem: str) -> bool:
+        import subprocess
+        tok = tmp_path / "t.der"; tok.write_bytes(der)
+        ca = tmp_path / "ca.pem"; ca.write_text(ca_pem, encoding="utf-8")
+        r = subprocess.run(
+            [_OPENSSL, "ts", "-verify", "-token_in", "-in", str(tok),
+             "-digest", digest_hex, "-CAfile", str(ca)],
+            capture_output=True, text=True)
+        return r.returncode == 0
+
+    def _corpus(self):
+        md, mca = _FIX["stamped_entry_hash"], _FIX["tsa_ca_cert_pem"]
+        cases = [
+            ("valid", _FIX["tst_token_b64"], md, mca, True),
+            ("no_ess", _FIX["no_ess_token_b64"], md, mca, False),
+            ("wrong_ess", _FIX["wrong_ess_token_b64"], md, mca, False),
+            ("expired", _FIX["expired_token_b64"], md, mca, False),
+            ("no_eku", _FIX["no_eku_token_b64"], md, mca, False),
+        ]
+        if "freetsa_token_b64" in _FIX:
+            cases.append(("freetsa", _FIX["freetsa_token_b64"],
+                          _FIX["freetsa_digest_hex"], _FIX["freetsa_ca_pem"], True))
+        return cases
+
+    def test_verdicts_match_openssl(self, tmp_path):
+        from cloakllm.timestamping import verify_timestamp_token
+        for name, b64, dig_hex, ca, expect in self._corpus():
+            der = base64.b64decode(b64)
+            ours = verify_timestamp_token(b64, bytes.fromhex(dig_hex),
+                                          trusted_certs_pem=[ca]).valid
+            osl = self._openssl_accepts(tmp_path, der, dig_hex, ca)
+            assert ours == osl == expect, (
+                f"{name}: ours={ours} openssl={osl} expected={expect}")
+
+
+# --- v0.11.1: fuzz the offline parser/verifier. Random + mutated bytes must
+# NEVER raise and NEVER return valid=True. Targets the parsing surface (the
+# hand-rolled JS mirror has the same harness). Seeded -> deterministic. ---
+
+class TestFuzzParser:
+    def test_random_and_truncated_never_raise_and_are_invalid(self):
+        # Pure-random and truncated inputs are structurally broken: they can
+        # never carry a valid signature, so valid MUST be False -- and the
+        # hand-rolled parsing surface must never raise (crash/DoS resistance).
+        import random
+        from cloakllm.timestamping import verify_timestamp_token
+        rng = random.Random(0xC10A)
+        base = base64.b64decode(_FIX["tst_token_b64"])
+        dig = _digest()
+        for i in range(3000):
+            if i % 2 == 0:                         # pure random blob
+                blob = bytes(rng.randrange(256) for _ in range(rng.randrange(0, 80)))
+            else:                                  # truncated real token (>=1 byte short)
+                blob = base[:rng.randrange(0, len(base))]
+            r = verify_timestamp_token(base64.b64encode(blob).decode(), dig)
+            assert r.valid is False  # never raises (would error the test), never wrongly valid
+
+    def test_bitflips_never_raise(self):
+        # A single bit-flip may land on a don't-care byte (e.g. the embedded
+        # cert's own signature, unchecked without a trust anchor) and leave the
+        # token validly verifiable -- that is correct. The invariant under fuzz
+        # is only that the parser NEVER raises on a mutated real token.
+        import random
+        from cloakllm.timestamping import verify_timestamp_token
+        rng = random.Random(0x5EED)
+        base = bytearray(base64.b64decode(_FIX["tst_token_b64"]))
+        dig = _digest()
+        for _ in range(3000):
+            b = bytearray(base)
+            for _ in range(rng.randrange(1, 12)):
+                b[rng.randrange(len(b))] = rng.randrange(256)
+            r = verify_timestamp_token(base64.b64encode(bytes(b)).decode(), dig)
+            assert r.valid in (True, False)  # a result object, no exception escaped

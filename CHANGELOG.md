@@ -5,6 +5,21 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.1] - 2026-06-23
+
+**Headline: trusted-timestamping crypto hardening — OpenSSL-differential verification + DER fuzzing.** A follow-up that raises confidence in the v0.11.0 RFC 3161 verifier *without* an external audit: its accept/reject verdict is now checked against an independent implementation, and its parsing surface is fuzzed.
+
+### Added
+- **OpenSSL-differential test suite** — the verifier MUST reach the same verdict as `openssl ts -verify` for every token in a committed corpus (a valid token + four single-defect negatives + a real freetsa.org token). Independent-implementation corroboration — the strongest signal short of a formal audit. Runs in CI (`[timestamping]` is now installed in CI so the suite executes rather than skips; openssl ships on the runners).
+- **DER-parser fuzz harness** — random and truncated inputs never raise and are always rejected; bit-flipped real tokens never raise. Crash/DoS resistance for the hand-rolled parsing surface.
+- Committed token-corpus additions: `no_ess`, `wrong_ess`, and a real `freetsa` token + its CA.
+
+### Fixed (hardening)
+- **ESS `SigningCertificateV2` attribute now required and verified** (RFC 3161 §2.4.1 / RFC 5035 / RFC 5816). The differential surfaced that the v0.11.0 verifier accepted a token lacking the ESS signing-certificate binding that OpenSSL — and any conforming verifier — requires; that left a cert-substitution surface. Both SDKs now reject a missing or mismatched ESS binding. Real TSAs (freetsa, eIDAS-qualified) always include it, so real-world checkpoints are unaffected; only non-compliant or synthetic tokens are newly rejected.
+
+### Tests
+- Python 907 → **913** (+6). All three packages re-aligned to 0.11.1 (py = js = mcp).
+
 ## [0.11.0] - 2026-06-22
 
 **Headline: RFC 3161 trusted timestamping (checkpoint-level).** The audit chain is tamper-evident; trusted timestamps add an *external clock the deployer cannot control*, closing the last documented gap (an attacker holding both the signing key and the root key could otherwise fabricate a backdated history). A Time-Stamp Authority binds the chain's latest `entry_hash` to a UTC time under its own certificate, proving "every entry up to seq N existed no later than T". For EU AI Act audiences, an **eIDAS-qualified TSA** gives that timestamp legal presumption of accuracy. First concrete piece of the v1.0 suite.
