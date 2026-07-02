@@ -39,7 +39,9 @@ jobs:
         # timestamping: installs asn1crypto so the RFC 3161 verifier tests +
         # the OpenSSL-differential suite actually RUN in CI (not skip). openssl
         # ships on GitHub runners.
-        run: pip install -e ".[dev,litellm,timestamping]"
+        # v0.12.0: spaCy moved to the [detection] extra -- CI must request it
+        # explicitly or the NER suite silently skips + `spacy download` fails.
+        run: pip install -e ".[dev,litellm,timestamping,detection]"
 
       - name: Download spaCy model
         run: python -m spacy download en_core_web_sm
@@ -72,21 +74,34 @@ jobs:
           python -m build --wheel
           python -m venv /tmp/wheel-test-venv
           /tmp/wheel-test-venv/bin/pip install --quiet --upgrade pip
+          # v0.12.0 smoke path 1: BARE wheel = detection-free (the release's
+          # headline path). Must import, run regex-only, and NOT pull spaCy.
           /tmp/wheel-test-venv/bin/pip install --quiet dist/cloakllm-*.whl
-          # v0.7.1: spaCy 3.8.14 on Python 3.12 doesn't always pull `click`
-          # transitively via `typer` in fresh venvs, breaking `python -m spacy
-          # download`. Install click explicitly as a workaround; this is a
-          # spaCy-CLI dep regression, not a cloakllm dep. Tracking upstream
-          # at https://github.com/explosion/spaCy/issues; remove when fixed.
-          /tmp/wheel-test-venv/bin/pip install --quiet click
-          /tmp/wheel-test-venv/bin/python -m spacy download en_core_web_sm
           /tmp/wheel-test-venv/bin/python -c "
+          import sys, warnings
+          warnings.simplefilter('ignore')
           import cloakllm
           from cloakllm import Shield, ShieldConfig, AuditChainIntegrityError
+          assert 'spacy' not in sys.modules, 'bare install must be spaCy-free'
           shield = Shield(ShieldConfig(audit_enabled=False))
           sanitized, tm = shield.sanitize('Email me at john@example.com please')
           assert '[EMAIL_0]' in sanitized, f'expected [EMAIL_0] in {sanitized!r}'
           restored = shield.desanitize(sanitized, tm)
           assert 'john@example.com' in restored, f'round-trip failed: {restored!r}'
-          print(f'install-smoke: OK — cloakllm {cloakllm.__version__} round-trip + AuditChainIntegrityError importable')
+          print(f'install-smoke 1/2 (detection-free): OK -- cloakllm {cloakllm.__version__}')
+          "
+          # v0.12.0 smoke path 2: [detection] extra restores NER. The extra now
+          # pins click>=8 (typer 0.26 dropped click from its deps while spaCy
+          # still imports it -- the v0.7.1 CI workaround, fixed at package level).
+          WHEEL=$(ls dist/cloakllm-*.whl)
+          /tmp/wheel-test-venv/bin/pip install --quiet "${WHEEL}[detection]"
+          /tmp/wheel-test-venv/bin/python -m spacy download en_core_web_sm
+          /tmp/wheel-test-venv/bin/python -c "
+          import warnings
+          warnings.simplefilter('ignore')
+          from cloakllm import Shield, ShieldConfig
+          shield = Shield(ShieldConfig(audit_enabled=False))
+          sanitized, tm = shield.sanitize('Meeting with Angela Merkel from Deutsche Bank')
+          assert any(t in sanitized for t in ('PERSON', 'ORG', 'GPE')), f'NER did not engage: {sanitized!r}'
+          print('install-smoke 2/2 ([detection] NER): OK --', sanitized)
           "

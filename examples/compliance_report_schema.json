@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cloakllm.dev/schemas/compliance_report/v1.0.json",
+  "$id": "https://cloakllm.dev/schemas/compliance_report/v1.1.json",
   "title": "CloakLLM Compliance Report",
   "description": "Structured regulatory-output schema produced by Shield.generate_compliance_report() (v0.8.0+). Designed to be auditor-consumable without CloakLLM-specific knowledge. Per-entry attestation block is shape-compatible with v0.8.1 ProvenanceReport (manifest-derived fields default to null until v0.8.1 KeyManifest ships).",
   "type": "object",
@@ -26,8 +26,8 @@
           "description": "CloakLLM version that produced this report."
         },
         "schema_version": {
-          "const": "1.0",
-          "description": "Compliance-report schema version. Bumped on backward-incompatible changes."
+          "enum": ["1.0", "1.1"],
+          "description": "Compliance-report schema version. '1.0' (v0.8.0); '1.1' (v0.12.0) adds the additive `coverage` block. Bumped on schema additions/changes."
         },
         "audit_dir": {
           "type": "string",
@@ -219,6 +219,44 @@
               "description": "v0.11.0: checkpoint counts by TSA URL."
             }
           }
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "description": "v0.12.0: the honest per-article coverage matrix. A static declaration (identical for every report of a given CloakLLM version) of the record-keeping/evidence/PII-minimization SLICE CloakLLM provides per article, and what remains the deployer's responsibility. NOT a claim of full conformity. Byte-identical across the Python and JS SDKs.",
+      "required": ["schema_version", "disclaimer", "articles", "out_of_scope"],
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "description": "Coverage sub-schema version."
+        },
+        "disclaimer": {
+          "type": "string",
+          "description": "Plain-language statement that CloakLLM covers a slice, not full conformity, and that coverage is gated on the deployer verifying detection quality."
+        },
+        "articles": {
+          "type": "array",
+          "description": "One entry per EU AI Act article CloakLLM touches.",
+          "items": {
+            "type": "object",
+            "required": ["article", "title", "status", "cloakllm_provides", "deployer_responsibility"],
+            "properties": {
+              "article": {"type": "string", "description": "Article identifier, e.g. EU_AI_Act_Art_12."},
+              "title": {"type": "string"},
+              "status": {
+                "enum": ["partial", "record_keeping_only"],
+                "description": "'partial' = CloakLLM provides part of the obligation; 'record_keeping_only' = CloakLLM records that the deployer met it but does not perform the obligation itself (e.g. Art 50 labeling)."
+              },
+              "cloakllm_provides": {"type": "string"},
+              "deployer_responsibility": {"type": "string"}
+            }
+          }
+        },
+        "out_of_scope": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Articles/obligations CloakLLM makes no claim about."
         }
       }
     },

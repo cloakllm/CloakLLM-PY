@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cloakllm"
-version = "0.11.5"
+version = "0.12.0"
 description = "AI Compliance Middleware — PII protection, tamper-evident audit logs, and EU AI Act compliance for LLM gateways"
 readme = "README.md"
 license = {text = "MIT"}
@@ -21,11 +21,22 @@ classifiers = [
     "Topic :: Security",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-dependencies = [
-    "spacy>=3.7.0",
-]
+# v0.12.0: core has NO hard runtime deps. Regex detection + tokenization + audit
+# + hash-chain verification are pure stdlib. spaCy NER moved to the `[detection]`
+# extra (NER degrades gracefully without it, v0.11.3) so the crypto/verify layer
+# is installable spaCy-free -- the basis for the lean standalone cloakllm-verifier.
+# Migration: for PERSON/ORG/GPE NER, install `cloakllm[detection]` (or `[all]`).
+dependencies = []
 
 [project.optional-dependencies]
+# spaCy NER pass (PERSON/ORG/GPE). Was a core dep through v0.11.5; moved here in
+# v0.12.0. Without it, detection is regex-only + a one-time warning.
+# click pin (2026-07-01): typer 0.26 dropped click from its declared deps, but
+# spacy 3.8.x still imports click directly while only declaring typer -- so a
+# fresh `pip install spacy` lands BROKEN (ModuleNotFoundError: click) until
+# upstream fixes their metadata. Pinning click here guarantees our documented
+# `pip install cloakllm[detection]` path always yields a working spaCy.
+detection = ["spacy>=3.7.0", "click>=8.0"]
 # v0.6.1 H6: bumped litellm floor to 1.83.0 (CVE-2026-35029, -35030, GHSA-69x8-hrgq-fjj8 fixed in 1.83.0).
 # v0.6.3 P0-1: pin aiohttp>=3.13.4 (litellm transitive) — fixes 10 CVEs in aiohttp 3.13.3
 # (CVE-2026-34513..34520, CVE-2026-22815, CVE-2026-34525). All fixed in aiohttp 3.13.4.
@@ -56,8 +67,21 @@ kms = [
 # v0.10.1: floor -> 48.0.1 (GHSA-537c-gmf6-5ccf); the old `<47.0.0` cap was blocking the fix,
 # leaving CI stuck on the now-vulnerable 46.0.7. cryptography is DEV-ONLY (the attestation
 # backend ships pynacl), so published wheels are unaffected -- this is a CI/dev-tree pin.
-dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "cryptography>=48.0.1,<50.0.0", "pip-audit>=2.7"]
-all = ["opentelemetry-api>=1.20,<2.0.0", "opentelemetry-sdk>=1.20,<2.0.0"]
+# v0.12.0: dev includes the detection deps -- the test suite is the one place
+# NER should always run (without spacy, the NER tests silently skip and a
+# contributor can green the suite while never exercising the NER paths).
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "cryptography>=48.0.1,<50.0.0", "pip-audit>=2.7",
+       "spacy>=3.7.0", "click>=8.0"]
+# NOTE: `all` deliberately EXCLUDES the [kms] extra (5 heavy cloud SDKs for a
+# feature that is still experimental/disabled since v0.6.1) and [dev] tooling.
+all = [
+    "spacy>=3.7.0", "click>=8.0",
+    "litellm>=1.83.0,<2.0.0", "aiohttp>=3.13.4", "python-dotenv>=1.2.2",
+    "pynacl>=1.5.0,<2.0.0",
+    "asn1crypto>=1.5", "cryptography>=48.0.1,<50.0.0",
+    "reportlab>=4.0,<5.0",
+    "opentelemetry-api>=1.20,<2.0.0", "opentelemetry-sdk>=1.20,<2.0.0",
+]
 
 [project.scripts]
 cloakllm = "cloakllm.__main__:main"

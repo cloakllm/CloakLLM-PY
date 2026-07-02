@@ -7,7 +7,7 @@ Thanks for your interest in contributing! This guide will help you get started.
 ```bash
 git clone https://github.com/cloakllm/cloakllm.git
 cd cloakllm
-pip install -e ".[dev,litellm]"
+pip install -e ".[dev,litellm,detection]"
 python -m spacy download en_core_web_sm
 ```
 

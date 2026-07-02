@@ -53,8 +53,12 @@ class ReportPeriod:
 
 # --- Constants ---
 
-SCHEMA_VERSION = "1.0"
-"""v0.8.0 compliance-report schema version. Bumped on backward-incompat changes."""
+SCHEMA_VERSION = "1.1"
+"""Compliance-report schema version. v0.8.0 = 1.0. v0.12.0 = 1.1 (additive
+`coverage` block; a consumer that ignores unknown keys is unaffected)."""
+
+COVERAGE_SCHEMA_VERSION = "1.0"
+"""v0.12.0 per-article coverage-matrix sub-schema version."""
 
 ATTESTATION_SCHEMA_VERSION = "1.0"
 """v0.8.0 = signature-only. v0.8.1 KeyManifest will bump this to '1.1'."""
@@ -73,6 +77,97 @@ _ART_50 = "EU_AI_Act_Art_50"
 
 # v0.11.0 TS-5: trusted-timestamping checkpoint event type.
 _CHAIN_CHECKPOINT_EVENT_TYPE = "chain_checkpoint"
+
+
+# v0.12.0: the honest per-article coverage matrix. CloakLLM covers the
+# record-keeping / evidence / PII-minimization SLICE of the articles below --
+# NOT full conformity. Publishing the limits (the "your responsibility" column)
+# is the point: it is what earns a skeptical DPO's trust and gives an auditor a
+# map. Emitted verbatim in every report as the `coverage` block. This literal
+# MUST stay byte-identical to js/src/compliance-report.js `_articleCoverage()`
+# (cross-SDK report parity). ASCII-only (rendered to Markdown/PDF + printed).
+def _article_coverage() -> dict:
+    """Return a fresh copy of the static per-article coverage matrix."""
+    return {
+        "schema_version": COVERAGE_SCHEMA_VERSION,
+        "disclaimer": (
+            "CloakLLM provides the record-keeping, evidence, and PII-minimization "
+            "slice of the articles below. It is NOT a full conformity solution for "
+            "the EU AI Act. Coverage of every article is gated on the deployer "
+            "verifying PII-detection quality on their own data. Articles not listed "
+            "here are out of scope for CloakLLM."
+        ),
+        "articles": [
+            {
+                "article": "EU_AI_Act_Art_12",
+                "title": "Record-keeping",
+                "status": "partial",
+                "cloakllm_provides": (
+                    "Hash-chained, tamper-evident audit logs containing zero original "
+                    "PII, one entry per sanitization with per-entity metadata; "
+                    "independently verifiable (hash chain + optional Ed25519 signatures "
+                    "+ RFC 3161 timestamps) via cloakllm-verifier."
+                ),
+                "deployer_responsibility": (
+                    "Verify PII-detection coverage on your own data (CloakLLM scrubs "
+                    "about 94 percent of sensitive characters on hard inputs, not 100 "
+                    "percent); log every high-risk interaction; set and enforce a "
+                    "retention policy; secure log storage and access."
+                ),
+            },
+            {
+                "article": "EU_AI_Act_Art_19",
+                "title": "Automatically generated logs",
+                "status": "partial",
+                "cloakllm_provides": (
+                    "The Article 12 logs are retained in a tamper-evident, independently "
+                    "verifiable form suitable for the automatic-logging obligation."
+                ),
+                "deployer_responsibility": (
+                    "Choose the retention duration your system requires; guarantee log "
+                    "availability and access control for that period."
+                ),
+            },
+            {
+                "article": "EU_AI_Act_Art_4a",
+                "title": "Special-category data for bias detection",
+                "status": "partial",
+                "cloakllm_provides": (
+                    "A pseudonymised special-category workflow (BiasDetectionSession) "
+                    "that records bias-audit evidence without persisting original "
+                    "special-category PII in the logs."
+                ),
+                "deployer_responsibility": (
+                    "Perform the bias analysis itself and establish its statistical "
+                    "validity; establish the legal basis for processing special-"
+                    "category data; decide which categories are in scope."
+                ),
+            },
+            {
+                "article": "EU_AI_Act_Art_50",
+                "title": "Transparency and content labeling",
+                "status": "record_keeping_only",
+                "cloakllm_provides": (
+                    "Record-keeping of content-generation events: a durable, verifiable "
+                    "log that generated content existed and how it was disclosed. The "
+                    "asset never enters CloakLLM (the caller passes a content hash)."
+                ),
+                "deployer_responsibility": (
+                    "Actually label or watermark the generated content and disclose it "
+                    "to users. CloakLLM records that you did; it does not perform the "
+                    "labeling itself."
+                ),
+            },
+        ],
+        "out_of_scope": [
+            "EU_AI_Act_Art_9 (risk management)",
+            "EU_AI_Act_Art_10 (data and data governance)",
+            "EU_AI_Act_Art_13 (transparency provided to deployers)",
+            "EU_AI_Act_Art_14 (human oversight)",
+            "EU_AI_Act_Art_15 (accuracy, robustness, cybersecurity)",
+            "Conformity assessment and CE marking",
+        ],
+    }
 
 
 # --- Helpers ---
@@ -406,7 +501,15 @@ def _fill_timestamp_summary(audit_entries_replay, period, attestation,
             if res.gen_time and (earliest is None or res.gen_time < earliest):
                 earliest = res.gen_time
         else:
-            anomalies.append(f"seq={seq}: checkpoint token INVALID ({res.reason})")
+            # v0.12.0 parity: the two SDKs' verify_timestamp_token impls word the
+            # detail after "malformed token:" differently (Py exception name vs
+            # JS DER parser message), which would break byte-identical reports on
+            # exactly the NON_COMPLIANT chains auditors cross-check. Keep the
+            # stable reason-code prefix, drop the implementation detail.
+            reason = res.reason or "invalid"
+            if reason.startswith("malformed token"):
+                reason = "malformed token"
+            anomalies.append(f"seq={seq}: checkpoint token INVALID ({reason})")
 
     attestation["provenance_summary"].update({
         "timestamped_checkpoints": found,
@@ -575,12 +678,20 @@ def build_report(
             # Categories aggregation. v0.10.3 HIGH-3: AUDIT-3 hardening --
             # malformed categories (non-dict, or non-int counts) must NOT
             # crash the report. Skip anything that isn't {str: int}.
+            # v0.12.0 parity: accept WHOLE floats as ints. JSON has no int/float
+            # distinction -- the bytes `1.0` parse to int 1 in JS but float 1.0
+            # in Python, so rejecting floats here made the two SDKs disagree on
+            # identical chain bytes (the 0-vs-0.0 divergence class).
             raw_cats = entry.get("categories")
             if isinstance(raw_cats, dict):
                 for cat, cnt in raw_cats.items():
                     if not isinstance(cat, str):
                         continue
-                    if isinstance(cnt, bool) or not isinstance(cnt, int):
+                    if isinstance(cnt, bool):
+                        continue
+                    if isinstance(cnt, float) and cnt.is_integer():
+                        cnt = int(cnt)
+                    if not isinstance(cnt, int):
                         continue
                     stats["categories_detected"][cat] = (
                         stats["categories_detected"].get(cat, 0) + cnt
@@ -641,12 +752,17 @@ def build_report(
                 d["articles_touched"].add(art)
             # v0.10.3 HIGH-3: same AUDIT-3 categories hardening as the per-
             # article loop -- malformed categories must not crash the report.
+            # v0.12.0: whole floats accepted as ints (same parity fix as above).
             _raw_cats = entry.get("categories")
             if isinstance(_raw_cats, dict):
                 for cat, cnt in _raw_cats.items():
                     if not isinstance(cat, str):
                         continue
-                    if isinstance(cnt, bool) or not isinstance(cnt, int):
+                    if isinstance(cnt, bool):
+                        continue
+                    if isinstance(cnt, float) and cnt.is_integer():
+                        cnt = int(cnt)
+                    if not isinstance(cnt, int):
                         continue
                     d["categories"][cat] = d["categories"].get(cat, 0) + cnt
             # v0.8.0 AUDIT-3: only compare when both sides are non-empty
@@ -836,6 +952,7 @@ def build_report(
         },
         "per_article": article_stats,
         "attestation": attestation,
+        "coverage": _article_coverage(),
         "verdict": verdict,
         "verdict_reasons": verdict_reasons,
     }
@@ -909,7 +1026,8 @@ def render_markdown(report: dict) -> str:
             lines.append("")
             lines.append(f"- Evidence event count: **{stats['evidence_event_count']}**")
             lines.append(f"- Decision count: **{stats.get('decision_count', 0)}**")
-            lines.append(f"- pii_in_log: **{stats.get('pii_in_log', False)}**")
+            # lowercase to match the JS renderer byte-for-byte (v0.12.0 parity)
+            lines.append(f"- pii_in_log: **{str(stats.get('pii_in_log', False)).lower()}**")
             cats = stats.get("categories_detected", {})
             if cats:
                 cat_str = ", ".join(f"{c}={n}" for c, n in sorted(cats.items()))
@@ -937,14 +1055,35 @@ def render_markdown(report: dict) -> str:
     lines.append(f"- Signatures valid: **{att['signatures_valid']}**")
     if att["key_ids"]:
         lines.append(f"- Signing key_ids: {', '.join(f'`{k}`' for k in att['key_ids'])}")
-    if att.get("schema_version") == "1.0":
+    # v0.12.0: the old note here ("not yet enabled. Ship v0.8.1+") was gated on
+    # attestation.schema_version == "1.0" -- which never got bumped when v0.8.1
+    # shipped, so every report was claiming a shipped feature didn't exist. The
+    # accurate signal is whether any manifest verification actually ran.
+    _ps = att.get("provenance_summary") or {}
+    if _ps.get("manifests_found") in (None, 0):
         lines.append("")
         lines.append(
-            "_KeyManifest-based external provenance verification is not "
-            "yet enabled. Ship v0.8.1+ to fill in the `provenance_summary` "
-            "fields._"
+            "_No KeyManifest-based provenance verification was performed for "
+            "this period (no key manifests were found or supplied)._"
         )
     lines.append("")
+
+    cov = report.get("coverage")
+    if cov:
+        lines.append("## Coverage matrix")
+        lines.append("")
+        lines.append(f"_{cov['disclaimer']}_")
+        lines.append("")
+        lines.append("| Article | What CloakLLM provides | Your responsibility |")
+        lines.append("|---|---|---|")
+        for a in cov["articles"]:
+            title = f"{a['article']} ({a['title']}, {a['status']})"
+            provides = a["cloakllm_provides"].replace("|", "\\|")
+            resp = a["deployer_responsibility"].replace("|", "\\|")
+            lines.append(f"| {title} | {provides} | {resp} |")
+        lines.append("")
+        lines.append(f"**Out of scope for CloakLLM:** {', '.join(cov['out_of_scope'])}")
+        lines.append("")
 
     if "decisions" in report:
         lines.append("## Per-decision rollup")
@@ -1077,11 +1216,46 @@ def render_pdf(report: dict, out_path: str) -> None:
         story.append(Paragraph(
             f"Signing key_ids: {', '.join(att['key_ids'])}", body,
         ))
-    if att.get("schema_version") == "1.0":
+    # v0.12.0: mirror the Markdown renderer's accurate note (the old
+    # schema_version=="1.0" gate claimed a shipped feature didn't exist).
+    _ps = att.get("provenance_summary") or {}
+    if _ps.get("manifests_found") in (None, 0):
         story.append(Spacer(1, 0.05 * inch))
         story.append(Paragraph(
-            "<i>KeyManifest-based external provenance verification not yet "
-            "enabled. v0.8.1+ fills in the provenance_summary fields.</i>",
+            "<i>No KeyManifest-based provenance verification was performed "
+            "for this period (no key manifests were found or supplied).</i>",
+            body,
+        ))
+
+    # v0.12.0: coverage matrix. The PDF is the artifact a compliance officer
+    # hands to an auditor -- the honest-limits disclosure must be in it, not
+    # only in the JSON/Markdown outputs.
+    cov = report.get("coverage")
+    if cov:
+        story.append(Spacer(1, 0.15 * inch))
+        story.append(Paragraph("Coverage matrix", h2))
+        story.append(Paragraph(f"<i>{cov['disclaimer']}</i>", body))
+        story.append(Spacer(1, 0.08 * inch))
+        cov_rows = [["Article", "What CloakLLM provides", "Your responsibility"]]
+        for a in cov["articles"]:
+            cov_rows.append([
+                Paragraph(f"<b>{a['article']}</b><br/>{a['title']}<br/>({a['status']})", body),
+                Paragraph(a["cloakllm_provides"], body),
+                Paragraph(a["deployer_responsibility"], body),
+            ])
+        ct = Table(cov_rows, colWidths=[1.4 * inch, 2.6 * inch, 2.6 * inch])
+        ct.setStyle(TableStyle([
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 9),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#FAFBFC")),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#CCD7E0")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(ct)
+        story.append(Spacer(1, 0.08 * inch))
+        story.append(Paragraph(
+            "<b>Out of scope for CloakLLM:</b> " + ", ".join(cov["out_of_scope"]),
             body,
         ))
 

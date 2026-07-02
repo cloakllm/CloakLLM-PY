@@ -37,10 +37,13 @@ Your current logging (`logger.info()`) won't survive an audit. CloakLLM provides
 ### Install
 
 ```bash
-pip install cloakllm                  # standalone usage
+pip install cloakllm                  # core install: regex detection, tokenization, audit (no NER)
+pip install cloakllm[detection]       # + spaCy NER (PERSON/ORG/GPE) — recommended
 pip install cloakllm[litellm]         # with LiteLLM integration
-python -m spacy download en_core_web_sm
+python -m spacy download en_core_web_sm   # NER model (needs [detection])
 ```
+
+> **v0.12.0:** spaCy moved to the `[detection]` extra so the core install is dependency-free (which enables the lean [`cloakllm-verifier`](https://github.com/cloakllm/cloakllm-verifier)). Without `[detection]`, detection is regex-only and PERSON/ORG/GPE may be missed — install the extra to keep pre-0.12 behavior.
 
 ### Option A: With OpenAI SDK (one line)
 

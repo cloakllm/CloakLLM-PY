@@ -25,8 +25,9 @@ import pytest
 from cloakllm import Shield, ShieldConfig, BiasDetectionSession
 from cloakllm.compliance_report import (
     ReportPeriod, build_report, render_markdown, SCHEMA_VERSION,
-    ATTESTATION_SCHEMA_VERSION,
+    ATTESTATION_SCHEMA_VERSION, COVERAGE_SCHEMA_VERSION, _article_coverage,
 )
+from cloakllm.attestation import _canonical_json
 
 
 _SCHEMA_PATH = (
@@ -550,3 +551,48 @@ class TestWithinWindowPctParityV0103:
         # cross-SDK contract (1 of 800 -> 0.13, was 0.12 under banker's round()).
         assert _pct(1, 800) == 0.13
         assert _pct(0, 0) == 0
+
+
+_COVERAGE_FIXTURE = (
+    Path(__file__).resolve().parent / "fixtures" / "coverage_canonical.txt"
+)
+
+
+class TestCoverageMatrix:
+    """v0.12.0: the honest per-article coverage matrix in every report."""
+
+    def _report(self):
+        return build_report(
+            audit_entries=[], period=ReportPeriod(None, None), cloakllm_version="0.12.0")
+
+    def test_report_includes_coverage_block(self):
+        cov = self._report()["coverage"]
+        assert cov["schema_version"] == COVERAGE_SCHEMA_VERSION
+        arts = {a["article"] for a in cov["articles"]}
+        assert arts == {"EU_AI_Act_Art_12", "EU_AI_Act_Art_19",
+                        "EU_AI_Act_Art_4a", "EU_AI_Act_Art_50"}
+        # every article carries both the "we provide" and "your responsibility"
+        for a in cov["articles"]:
+            assert a["cloakllm_provides"] and a["deployer_responsibility"]
+        assert cov["out_of_scope"]  # limits published, not hidden
+
+    def test_schema_version_bumped_to_1_1(self):
+        assert SCHEMA_VERSION == "1.1"
+        assert self._report()["report_metadata"]["schema_version"] == "1.1"
+
+    def test_coverage_is_ascii_only(self):
+        # AUDIT-6: rendered to Markdown/PDF + can be printed -> must be ASCII.
+        _canonical_json(_article_coverage()).encode("ascii")
+
+    def test_coverage_canonical_matches_cross_sdk_fixture(self):
+        # The SAME fixture bytes are committed in cloakllm-js/test/fixtures/.
+        # Both SDKs asserting against identical bytes locks byte-parity; drift in
+        # either SDK fails its own test. (Release AUDIT-5 also diffs the two.)
+        expected = _COVERAGE_FIXTURE.read_text(encoding="utf-8")
+        assert _canonical_json(_article_coverage()) == expected
+
+    def test_markdown_renders_coverage_section(self):
+        md = render_markdown(self._report())
+        assert "## Coverage matrix" in md
+        assert "Your responsibility" in md
+        assert "Out of scope for CloakLLM" in md

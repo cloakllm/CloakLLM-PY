@@ -5,6 +5,20 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-07-01
+
+**Headline: Independent Verifiability.** A separate, dependency-light package — [`cloakllm-verifier`](https://github.com/cloakllm/cloakllm-verifier) — lets an auditor verify every CloakLLM artifact (hash chain, RFC 3161 timestamps, KeyManifest provenance + revocation) and re-validate a compliance report **without the full SDK and without trusting CloakLLM's code**. It reuses this package's own verify functions (single source of truth, no drift) but installs only the crypto extras — no spaCy.
+
+### Changed (packaging — action may be required)
+- **spaCy is no longer a core dependency.** `pip install cloakllm` now installs **detection-free** (regex detection still works; NER degrades gracefully per v0.11.3). To get spaCy NER back, install the new extra: **`pip install cloakllm[detection]`** (or `cloakllm[all]` for everything). This is what lets the verify layer (attestation / timestamping / compliance-report) import without the NLP stack.
+- `cloakllm/__init__.py` is now **lazy** (PEP 562 `__getattr__`): `import cloakllm` no longer eagerly imports the detector, so the verify surface loads spaCy-free. Public API and `__all__` unchanged.
+
+### Added
+- **Per-article coverage matrix** in every compliance report — a machine-readable `coverage` block (report schema `1.0` -> `1.1`, additive) stating, per EU AI Act article, what CloakLLM provides and what remains the deployer's responsibility, plus an `out_of_scope` list. Byte-identical across the Python and JS SDKs. Rendered as a `## Coverage matrix` table in the Markdown report. Honest-limits-as-a-feature; see GUIDE.
+
+### Fixed
+- **`[detection]` extra pins `click>=8.0`** — an upstream metadata break (typer 0.26 dropped `click` from its declared dependencies while spaCy 3.8.x still imports `click` directly) currently makes any *fresh* spaCy install broken (`ModuleNotFoundError: click` on `import spacy`), silently degrading NER to regex-only. Found by this release's clean-room install audit; note the same breakage affects fresh installs of *published* `cloakllm<=0.11.5` (spaCy was a core dep) — installing `cloakllm[detection] >=0.12.0` (or `click>=8` manually) is the remedy there too.
+
 ## [0.11.5] - 2026-06-23
 
 ### Fixed

@@ -65,9 +65,12 @@ class NerBackend(DetectorBackend):
         except ImportError as e:
             # spaCy absent OR broken (e.g. a partial install missing a
             # transitive dep -> ModuleNotFoundError, a subclass of ImportError).
+            # v0.12.0: spaCy is no longer a core dependency -- absent is the
+            # NORMAL state of a bare `pip install cloakllm`, not a broken one.
             self._nlp = self._degrade(
                 f"spaCy could not be imported ({type(e).__name__}: {e}). "
-                f"Repair the install (spaCy is a dependency of cloakllm)."
+                f"Install the NER extra: pip install 'cloakllm[detection]' "
+                f"(spaCy moved out of the core dependencies in v0.12.0)."
             )
             return self._nlp
         try:
