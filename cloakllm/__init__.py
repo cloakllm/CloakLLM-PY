@@ -19,7 +19,7 @@ Standalone usage:
     # sanitized: "Send email to [EMAIL_0] about [ORG_0]"
 """
 
-__version__ = "0.12.0"
+__version__ = "0.12.1"
 
 # v0.12.0: LAZY top-level imports (PEP 562). `import cloakllm` no longer eager-
 # loads Shield -> detection -> spaCy. This lets the crypto/verify layer

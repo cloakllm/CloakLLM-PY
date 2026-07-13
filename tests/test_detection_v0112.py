@@ -110,3 +110,23 @@ def test_hard_corpus_fair_scrub_threshold(shield):
     scrub = fair["scrub"] / (fair["total"] or 1)
     assert scrub >= 0.90, f"FAIR scrub {scrub:.1%} < 90% (no-PII recall regressed)"
     assert fair["partial"] == 0, f"{fair['partial']} partial leak(s) on FAIR slice"
+
+
+# --- v0.12.1: spaced/formatted all-2-digit-grouped phone leak fix ---
+# The base PHONE pattern assumed 3-4 digit groups, so a French/European
+# "06 12 34 56 78" (all 2-digit groups, 8-10 digits) leaked verbatim on the
+# default (non-locale) config. Regression: it must now scrub.
+
+@pytest.mark.parametrize("text", [
+    "call 06 12 34 56 78 now",
+    "call 06.12.34.56.78 now",
+    "call 06-12-34-56-78 now",
+])
+def test_spaced_grouped_phone_does_not_leak(shield, text):
+    out = _sanitize(shield, text)
+    assert out == "call [PHONE_0] now", out
+
+
+def test_spaced_date_not_flagged_as_phone(shield):
+    # precision guard: a spaced date must NOT be captured as a phone
+    assert "PHONE" not in _cats(shield, "meeting 12 25 2024 agenda")

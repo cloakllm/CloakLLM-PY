@@ -5,6 +5,11 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-07-07
+
+### Fixed
+- **Detection: spaced/formatted phone numbers no longer leak on the default config.** The base `PHONE` pattern assumed 3-4 digit groups, so an all-2-digit-grouped number — e.g. the French/European mobile format `06 12 34 56 78` (also `.`/`-` separated), 8-10 digits — flowed **verbatim** into the sanitized prompt and audit log when a locale wasn't configured (found by the hard-corpus benchmark; same *class* as the v0.11.2 spaced-credit-card/IBAN fix). Added a second alternative to the pattern (a leading 2-digit pair + 3-4 separated 2-digit groups, separators required so arbitrary digit runs don't match). Applied **byte-identically** in both SDKs — cross-SDK regex differential stays at 0 divergences. Hard-corpus FAIR-slice char-level scrub 94.1% -> **97.1%**, still 0 partial leaks, no new false positives (a spaced date like `12 25 2024` is still not flagged). Regression-guarded in `tests/test_detection_v0112.py` (+ JS mirror). Recall-over-precision stance unchanged: for a PII tool, over-redacting a non-PII number is the safe failure; the ambiguous SSN/card-shaped hard-negatives were deliberately left alone.
+
 ## [0.12.0] - 2026-07-01
 
 **Headline: Independent Verifiability.** A separate, dependency-light package — [`cloakllm-verifier`](https://github.com/cloakllm/cloakllm-verifier) — lets an auditor verify every CloakLLM artifact (hash chain, RFC 3161 timestamps, KeyManifest provenance + revocation) and re-validate a compliance report **without the full SDK and without trusting CloakLLM's code**. It reuses this package's own verify functions (single source of truth, no drift) but installs only the crypto extras — no spaCy.

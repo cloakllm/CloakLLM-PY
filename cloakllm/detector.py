@@ -111,7 +111,15 @@ PATTERNS: dict[str, tuple[str, str]] = {
     #     a long digit run to be parsed as area+rest in many ways.
     "PHONE": (
         r"phone",
-        r"(?<!\d)(?:\+\d{1,3}[-.\s])?(?:\(\d{2,4}\)[-.\s]?|\d{2,4}[-.\s])?\d{3,4}[-.\s]?\d{3,4}(?!\d)"
+        # v0.12.1: the prior pattern assumed 3-4 digit groups, so all-2-digit-
+        # grouped numbers (e.g. French/European "06 12 34 56 78", 8-10 digits)
+        # leaked verbatim on the default (non-locale) config. Added a second
+        # alternative for that shape (a leading 2-digit pair + 3-4 separated
+        # 2-digit groups, separators REQUIRED so arbitrary digit runs don't match).
+        r"(?<!\d)(?:"
+        r"(?:\+\d{1,3}[-.\s])?(?:\(\d{2,4}\)[-.\s]?|\d{2,4}[-.\s])?\d{3,4}[-.\s]?\d{3,4}"
+        r"|\d{2}(?:[-.\s]\d{2}){3,4}"
+        r")(?!\d)"
     ),
     # IP addresses (IPv4 + IPv6). v0.11.2: IPv6 was entirely undetected before,
     # so a whole address (e.g. 2001:db8:85a3::8a2e:370:7334) leaked verbatim.
