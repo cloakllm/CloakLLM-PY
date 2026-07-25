@@ -1,0 +1,44 @@
+# CodeQL static analysis (SAST).
+#
+# bandit runs as part of the pre-release Step 0 audit; CodeQL adds a deeper
+# analyzer on EVERY commit rather than only when we remember. Findings land in
+# the repo's Security > Code scanning tab.
+#
+# Actions are pinned by commit SHA: a floating tag (@v3) is a movable pointer
+# controlled by another repo, which is a live path into CI. A SHA is not.
+name: CodeQL
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    - cron: '18 5 * * 1'   # weekly, Monday
+
+permissions: read-all
+
+jobs:
+  analyze:
+    name: Analyze Python
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write   # required to upload results
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@4187e74d05793876e9989daffde9c3e66b4acd07 # v3
+        with:
+          languages: python
+          queries: security-and-quality
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@4187e74d05793876e9989daffde9c3e66b4acd07 # v3
+        with:
+          category: "/language:python"
