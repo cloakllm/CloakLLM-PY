@@ -32,8 +32,11 @@ jobs:
       # v0.6.3 P0-1: GitHub-hosted runners ship with pip 25.2 which has known
       # CVEs (CVE-2025-8869 fixed in 25.3, CVE-2026-1703 fixed in 26.0). Upgrade
       # before pip-audit runs.
-      - name: Upgrade pip
-        run: pip install --upgrade pip
+      # 2026-07-25: same class for setuptools -- runners ship 79.0.1, which has
+      # PYSEC-2026-3447 (fixed in 83.0.0). Both are CI build-time tools, not
+      # runtime deps of the published wheel; upgrading is the fix (no waiver).
+      - name: Upgrade pip and setuptools
+        run: pip install --upgrade pip setuptools
 
       - name: Install dependencies
         # timestamping: installs asn1crypto so the RFC 3161 verifier tests +
