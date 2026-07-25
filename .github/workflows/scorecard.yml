@@ -1,0 +1,60 @@
+# OpenSSF Scorecard -- supply-chain security posture.
+#
+# PRIVATE BASELINE MODE: `publish_results: false`, so results are NOT sent to
+# the OpenSSF public API (no badge, nothing on deps.dev). The score is written
+# to a JSON artifact on the workflow run, visible only to us. This lets us
+# measure -> fix the gaps -> and only then decide whether to publish.
+#
+# To publish later (deliberately): set `publish_results: true`, add
+# `id-token: write` to the job permissions, and add the badge to the README.
+#
+# Actions are pinned by commit SHA (Scorecard's own Pinned-Dependencies check).
+name: Scorecard
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '32 4 * * 1'   # weekly, Monday
+  push:
+    branches: ["main"]
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@62b2cac7ed8198b15735ed49ab1e5cf35480ba46 # v2.4.0
+        with:
+          results_file: results.json
+          results_format: json
+          # Private baseline: do NOT upload to the OpenSSF public API.
+          publish_results: false
+
+      - name: Print scores to the run log
+        run: |
+          python3 - <<'EOF'
+          import json
+          d = json.load(open("results.json"))
+          print(f"OVERALL SCORE: {d.get('score')}")
+          print("-" * 52)
+          for c in sorted(d.get("checks", []), key=lambda x: (x.get("score") if x.get("score") is not None else -1)):
+              print(f"{str(c.get('score')):>3}  {c.get('name')}")
+          EOF
+
+      - name: Upload results artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scorecard-results
+          path: results.json
+          retention-days: 30
