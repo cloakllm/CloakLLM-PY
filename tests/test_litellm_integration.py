@@ -1,4 +1,4 @@
-"""Integration tests for LiteLLM middleware with streaming support."""
+﻿"""Integration tests for LiteLLM middleware with streaming support."""
 
 import asyncio
 import sys
@@ -154,7 +154,7 @@ class TestLiteLLMAsyncStreaming:
                 output.append(chunk)
             return output
 
-        output_chunks = asyncio.get_event_loop().run_until_complete(run())
+        output_chunks = asyncio.run(run())
         assert len(output_chunks) >= 1
 
         full_content = "".join(

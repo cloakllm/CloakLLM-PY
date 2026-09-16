@@ -296,21 +296,124 @@ class TestEssSigningCert:
 # implementation corroboration (the strongest signal short of a formal audit).
 # Skipped if openssl is not on PATH; REQUIRED in CI (runners ship openssl). ---
 
+import os  # noqa: E402
+import re  # noqa: E402
 import shutil  # noqa: E402
+import subprocess  # noqa: E402
 
-_OPENSSL = shutil.which("openssl")
+# Resolve a CAPABLE openssl, not merely a present one.
+#
+# A stale openssl on PATH is WORSE than none. This corpus exercises the ESS
+# SigningCertificateV2 check added in v0.11.1 (RFC 5035), which OpenSSL 1.0.x
+# does not handle -- it returns a confident "invalid" for a token that is
+# valid, and the differential then reports a mismatch that says nothing about
+# our implementation. That is the opposite of what an independent oracle is
+# for. Seen in the wild: a 2016 openssl shipped with Subversion shadowing a
+# modern one earlier on PATH.
+#
+# Order: $OPENSSL_BIN, then PATH, then common install locations. OPENSSL_BIN is
+# a PREFERRED candidate, not a hard override -- if it names a build too old for
+# this corpus the search continues, because using a stale oracle is the failure
+# being prevented and silently downgrading to it would defeat the point.
+_MIN_OPENSSL = (1, 1, 1)
 
 
-@pytest.mark.skipif(_OPENSSL is None, reason="openssl not on PATH")
+_OPENSSL_PROBE_ERRORS = []
+
+
+def _openssl_info(binary):
+    """Return (path, version_tuple, banner) for a runnable openssl, else None.
+
+    Records WHY a candidate was rejected. A resolver that fails silently is how
+    an oracle ends up switched off without anyone noticing.
+    """
+    if not binary:
+        return None
+    try:
+        # stdin=DEVNULL is load-bearing on Windows under pytest: capture_output
+        # pipes stdout and stderr but leaves stdin inheriting the fd pytest has
+        # already redirected, and the spawn dies with
+        # "OSError: [WinError 6] The handle is invalid". Without this the probe
+        # fails for EVERY candidate and the differential skips on a machine
+        # with a perfectly good openssl -- green, with the oracle switched off.
+        out = subprocess.run([binary, "version"], capture_output=True,
+                             text=True, timeout=10,
+                             stdin=subprocess.DEVNULL).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        _OPENSSL_PROBE_ERRORS.append("%s: %s: %s" % (binary, type(exc).__name__, exc))
+        return None
+    m = re.search(r"OpenSSL\s+(\d+)\.(\d+)\.(\d+)", out or "")
+    if not m:
+        _OPENSSL_PROBE_ERRORS.append("%s: unparseable version %r" % (binary, out))
+        return None
+    return (binary, tuple(int(g) for g in m.groups()), out.strip().splitlines()[0])
+
+
+def _find_openssl():
+    candidates = [
+        os.environ.get("OPENSSL_BIN"),
+        shutil.which("openssl"),
+        r"C:\Program Files\Git\mingw64\bin\openssl.exe",
+        r"C:\Program Files\Git\usr\bin\openssl.exe",
+        r"C:\Program Files\OpenSSL-Win64\bin\openssl.exe",
+        "/usr/bin/openssl",
+        "/usr/local/bin/openssl",
+        "/opt/homebrew/bin/openssl",
+    ]
+    too_old = []
+    for c in candidates:
+        info = _openssl_info(c)
+        if info is None:
+            continue
+        if info[1] >= _MIN_OPENSSL:
+            return info[0], too_old
+        too_old.append(info[2])
+    return None, too_old
+
+
+_OPENSSL_CACHE = {}
+
+
+def _require_openssl():
+    """Resolve a usable openssl, or skip -- except in CI, where it FAILS.
+
+    Deliberately lazy. Probing the version means spawning a process, and doing
+    that at import time is unsafe under pytest: during collection pytest has
+    already redirected fds 1 and 2, the spawn raises OSError, and a broad
+    except turns that into "no openssl found". The differential then SKIPS
+    SILENTLY on a machine with a perfectly good openssl -- a green run with the
+    independent oracle quietly switched off, which is the one failure this test
+    exists to make impossible. Resolving inside the test body avoids it
+    entirely, because per-test capture handles subprocesses correctly.
+    """
+    if "resolved" not in _OPENSSL_CACHE:
+        _OPENSSL_CACHE["resolved"] = _find_openssl()
+    binary, too_old = _OPENSSL_CACHE["resolved"]
+    if binary:
+        return binary
+
+    if too_old:
+        reason = ("no openssl >= %s (found only: %s) -- set OPENSSL_BIN to a modern build"
+                  % (".".join(str(p) for p in _MIN_OPENSSL), "; ".join(too_old)))
+    else:
+        reason = "openssl not found -- set OPENSSL_BIN to run the differential"
+    if _OPENSSL_PROBE_ERRORS:
+        reason += " [probe errors: %s]" % "; ".join(_OPENSSL_PROBE_ERRORS)
+    # "REQUIRED in CI" was only a comment, so a CI box without a usable openssl
+    # would have skipped and still gone green. Make the requirement real.
+    if os.environ.get("CI"):
+        pytest.fail(reason)
+    pytest.skip(reason)
+
+
 class TestOpenSSLDifferential:
     def _openssl_accepts(self, tmp_path, der: bytes, digest_hex: str, ca_pem: str) -> bool:
-        import subprocess
         tok = tmp_path / "t.der"; tok.write_bytes(der)
         ca = tmp_path / "ca.pem"; ca.write_text(ca_pem, encoding="utf-8")
         r = subprocess.run(
-            [_OPENSSL, "ts", "-verify", "-token_in", "-in", str(tok),
+            [_require_openssl(), "ts", "-verify", "-token_in", "-in", str(tok),
              "-digest", digest_hex, "-CAfile", str(ca)],
-            capture_output=True, text=True)
+            capture_output=True, text=True, stdin=subprocess.DEVNULL)
         return r.returncode == 0
 
     def _corpus(self):

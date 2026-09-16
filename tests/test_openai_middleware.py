@@ -1,4 +1,4 @@
-"""
+﻿"""
 Tests for OpenAI SDK middleware integration.
 
 Run: pytest tests/test_openai_middleware.py -v
@@ -16,9 +16,9 @@ from cloakllm import ShieldConfig
 from cloakllm.integrations import openai_middleware
 
 
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 # Helpers
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 def _make_response(content: str):
     """Create a mock OpenAI ChatCompletion response."""
@@ -70,9 +70,9 @@ def _make_stream_chunks(text: str):
     return chunks
 
 
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 # Fixtures
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 @pytest.fixture(autouse=True)
 def clean_state(tmp_path):
@@ -97,9 +97,9 @@ def config(tmp_path):
     )
 
 
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 # Test: enable / disable
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 class TestEnableDisable:
     def test_enable_patches_create(self, config):
@@ -152,9 +152,9 @@ class TestEnableDisable:
         assert openai_middleware._shield is None
 
 
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 # Test: sync create
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 class TestSyncCreate:
     def test_sanitizes_messages(self, config):
@@ -268,9 +268,9 @@ class TestSyncCreate:
         assert image_part["image_url"]["url"] == "data:image/png;base64,abc"
 
 
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 # Test: skip models
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 class TestSkipModels:
     def test_skip_models_config(self, tmp_path):
@@ -295,9 +295,9 @@ class TestSkipModels:
         assert "john@example.com" in user_msg["content"]
 
 
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 # Test: sync streaming
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 class TestSyncStreaming:
     def test_stream_desanitizes(self, config):
@@ -325,9 +325,9 @@ class TestSyncStreaming:
         assert "[EMAIL_0]" not in full_content
 
 
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 # Test: async create
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 class TestAsyncCreate:
     def test_async_sanitizes_and_desanitizes(self, config):
@@ -335,7 +335,7 @@ class TestAsyncCreate:
         client = _make_async_client(response)
         openai_middleware.enable(client, config=config)
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": "Email john@example.com please"}],
@@ -350,7 +350,7 @@ class TestAsyncCreate:
         client = _make_async_client(response)
         openai_middleware.enable(client, config=config)
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": "What is the weather?"}],
@@ -360,9 +360,9 @@ class TestAsyncCreate:
         assert result.choices[0].message.content == "The weather is fine."
 
 
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 # Test: async streaming
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 class TestAsyncStreaming:
     def test_async_stream_desanitizes(self, config):
@@ -388,7 +388,7 @@ class TestAsyncStreaming:
                 output.append(chunk)
             return output
 
-        output_chunks = asyncio.get_event_loop().run_until_complete(run())
+        output_chunks = asyncio.run(run())
         # Incremental streaming: multiple chunks emitted as text arrives
         assert len(output_chunks) >= 1
         full_content = "".join(
@@ -399,9 +399,9 @@ class TestAsyncStreaming:
         assert "[EMAIL_0]" not in full_content
 
 
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 # Test: token map cleanup
-# ──────────────────────────────────────────────
+# ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 class TestCleanup:
     def test_active_maps_cleaned_after_call(self, config):
