@@ -1,4 +1,4 @@
-name: CI
+﻿name: CI
 
 on:
   push:
@@ -19,7 +19,15 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        # 3.13/3.14 added 2026-09-16. pyproject says requires-python >=3.10,
+        # but the matrix stopped at 3.12 -- so anyone installing on 3.13 or
+        # 3.14 was running something CI had never exercised. Found the hard
+        # way: a dev machine that had moved to 3.14 hit the removal of
+        # implicit event-loop creation (asyncio.get_event_loop no longer
+        # creates one), which CI could not have caught. That was test-only,
+        # but "no known problem" on two unexercised minors is not the standard
+        # applied anywhere else here.
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -64,7 +72,7 @@ jobs:
 
       # v0.6.5: Build the wheel and import it from a fresh venv. The cloakllm
       # py CI already exercises real spaCy / litellm via `pip install -e ...`
-      # so the upstream-API-drift class of bug is mostly caught — but a wheel
+      # so the upstream-API-drift class of bug is mostly caught ג€” but a wheel
       # built with broken metadata (missing files, wrong package_data) would
       # only surface on user installs. This step closes that gap.
       #
