@@ -1,11 +1,11 @@
-name: Publish to PyPI
+﻿name: Publish to PyPI
 
 on:
   push:
     tags: ["v*"]
 
 # v0.6.1 H7: scoped permissions + concurrency lock to prevent racing publishes.
-# v0.6.3 I6: OIDC trusted publishing — no long-lived token in CI.
+# v0.6.3 I6: OIDC trusted publishing ג€” no long-lived token in CI.
 permissions:
   contents: read
   id-token: write  # required for OIDC trusted publishing to PyPI
@@ -17,19 +17,19 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # v0.6.3 I6: GitHub Environment provides extra protection — required reviewers,
+    # v0.6.3 I6: GitHub Environment provides extra protection ג€” required reviewers,
     # branch/tag restrictions, and a clean audit trail of every release.
-    # Configure at: Settings → Environments → New environment "pypi"
+    # Configure at: Settings ג†’ Environments ג†’ New environment "pypi"
     # (Environment is OPTIONAL: if it does not exist, the job runs unprotected.)
     environment:
       name: pypi
       url: https://pypi.org/p/cloakllm
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
@@ -50,9 +50,9 @@ jobs:
       # See: https://docs.pypi.org/trusted-publishers/
       # After first successful OIDC publish, delete the PYPI_API_TOKEN secret.
       - name: Publish to PyPI (OIDC)
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
-          # No `password:` — action uses the OIDC token automatically.
+          # No `password:` ג€” action uses the OIDC token automatically.
           # Skip duplicates so re-running an already-published tag is a no-op
           # rather than a hard failure.
           skip-existing: true
