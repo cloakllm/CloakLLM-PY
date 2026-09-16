@@ -71,10 +71,35 @@ class TestValidateContentContext:
         _validate_content_context(_valid_cc(modality=mod))
 
     @pytest.mark.parametrize(
-        "disc", ["c2pa", "watermark", "metadata", "visible_notice", "none"]
+        "disc",
+        ["c2pa", "watermark", "metadata", "visible_notice", "audible_notice",
+         "none", "other"],
     )
     def test_all_disclosure_methods(self, disc):
         _validate_content_context(_valid_cc(disclosure_method=disc))
+
+    def test_audible_notice_accepted(self):
+        # The Commission contemplates "visible OR AUDIBLE" labels. Before this
+        # value existed, a deployer disclosing an audio deepfake audibly had to
+        # either misrepresent it as visible_notice or fail validation -- and it
+        # bites exactly where Art 50(4) focuses.
+        _validate_content_context(
+            _valid_cc(modality="audio", disclosure_method="audible_notice"))
+
+    def test_other_absorbs_future_techniques(self):
+        # Article 50 deliberately does not enumerate marking techniques, so a
+        # closed enum will always lag PRACTICE even though it cannot drift
+        # against the LAW. `other` is the escape hatch that keeps the whitelist
+        # closed (junk and PII stay out of the log) without forecasting.
+        _validate_content_context(_valid_cc(disclosure_method="other"))
+
+    def test_speculative_values_are_still_rejected(self):
+        # `other` is deliberately NOT a licence to pre-add guesses. Values with
+        # no concrete, guidance-backed case must still fail, so the taxonomy
+        # only grows when real usage names something.
+        for guess in ("fingerprint", "provenance", "steganography"):
+            with pytest.raises(RuntimeError, match="disclosure_method"):
+                _validate_content_context(_valid_cc(disclosure_method=guess))
 
     def test_reject_bad_modality(self):
         with pytest.raises(RuntimeError, match="modality"):

@@ -211,9 +211,34 @@ _CONTENT_CONTEXT_ALLOWED_KEYS = frozenset({
 _CONTENT_CONTEXT_REQUIRED_KEYS = frozenset({
     "modality", "synthetic", "labeled", "disclosure_method", "deepfake",
 })
+# Matches Article 50(2) exactly ("synthetic audio, image, video or text
+# content"), re-verified against the final Commission Guidelines of 20 Jul 2026.
 _CONTENT_MODALITY_WHITELIST = frozenset({"text", "image", "audio", "video"})
+
+# NOTE: this is OUR taxonomy, not a regulatory one. Article 50 deliberately
+# declines to enumerate marking techniques (it requires only that they be
+# machine-readable, effective, interoperable, robust and reliable), leaving
+# implementation to codes of practice. So this list cannot drift against the
+# LAW -- but a closed enum will always lag real-world PRACTICE.
+#
+# The first symptom was concrete: the Commission contemplates "visible or
+# audible" labels, and a deployer disclosing an audio deepfake audibly had no
+# accurate value -- they had to misrepresent it as `visible_notice` or fail
+# validation. Both are the same failure, and it bites exactly where Art 50(4)
+# focuses.
+#
+# The fix is the enum's PHILOSOPHY, not one missing value. It stays CLOSED
+# (these whitelists exist to keep junk and PII out of the log) and gains
+# `other` rather than an attempt to enumerate the future. `audible_notice` is
+# added because it has a concrete, guidance-backed case; `fingerprint` and
+# friends are deliberately NOT pre-added -- let `other` absorb them until real
+# usage names them.
+#
+# Purely additive: old records still validate, no schema bump, no change to
+# hash semantics.
 _CONTENT_DISCLOSURE_WHITELIST = frozenset({
-    "c2pa", "watermark", "metadata", "visible_notice", "none",
+    "c2pa", "watermark", "metadata", "visible_notice", "audible_notice",
+    "none", "other",
 })
 _CONTENT_CONTEXT_BOOL_FIELDS = frozenset({"synthetic", "labeled", "deepfake"})
 _CONTENT_CONTEXT_STR_MAX_LEN = {
