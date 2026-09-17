@@ -981,7 +981,7 @@ class AuditLogger:
                     f"would let an attacker mask tampering as a normal restart."
                 )
             # else: log_files empty (truly first run) OR all files empty AND
-            # strict mode off → start from GENESIS (back-compat default).
+            # strict mode off -> start from GENESIS (back-compat default).
             self._initialized = True
 
     def _get_log_file(self) -> Path:
