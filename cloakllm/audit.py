@@ -213,6 +213,31 @@ _CONTENT_CONTEXT_REQUIRED_KEYS = frozenset({
 })
 # Matches Article 50(2) exactly ("synthetic audio, image, video or text
 # content"), re-verified against the final Commission Guidelines of 20 Jul 2026.
+def _collapse_whole_floats(value):
+    """Recursively rewrite whole-valued floats as ints, for cross-SDK hashing.
+
+    `json.dumps(0.0)` is "0.0" in Python and "0" in JavaScript -- the same
+    number, different canonical bytes, and therefore a different SHA-256. Any
+    hashed float that lands on a whole number makes a Python-written chain
+    unverifiable by the JS verifier (and vice versa).
+
+    Collapsing to int makes both SDKs emit the same bytes, because
+    `json.dumps(0)` is "0" in each. Non-whole floats (0.95, 5.5) already agree
+    and are left alone.
+
+    bool is deliberately safe here: it is a subclass of int, not of float, so
+    `isinstance(True, float)` is False and True/False pass through untouched.
+    Collapsing them to 1/0 would corrupt the schema's boolean fields.
+    """
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else value
+    if isinstance(value, dict):
+        return {k: _collapse_whole_floats(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_collapse_whole_floats(v) for v in value]
+    return value
+
+
 _CONTENT_MODALITY_WHITELIST = frozenset({"text", "image", "audio", "video"})
 
 # NOTE: this is OUR taxonomy, not a regulatory one. Article 50 deliberately
@@ -1138,6 +1163,30 @@ class AuditLogger:
             # v0.6.1 B3: ALWAYS-ON allow-list schema validation. The no-PII-in-logs
             # invariant is a project-wide guarantee, not a compliance-mode feature.
             _validate_audit_entry_schema(entry_data)
+
+            # v0.12.2 XS-1: collapse whole-valued floats to int before hashing.
+            #
+            # Python's json.dumps writes 0.0 as "0.0"; JavaScript's writes it as
+            # "0". Same number, different canonical bytes, different SHA-256 --
+            # so a Python-written chain was reported as TAMPERED by the JS
+            # verifier. See _canonical.py / _canonical.js.
+            #
+            # The convention "producers pass int 0, not float 0.0" already
+            # existed and was followed at the Article 4a bias sites, but NOT on
+            # this core path -- and `latency_ms` DEFAULTS to 0.0 while timing
+            # values round to 0.0 for any sub-millisecond operation. A
+            # five-entry end-to-end run had four entries unverifiable in JS, so
+            # this was the common case, not an edge one.
+            #
+            # Enforcing it here rather than at each call site makes it
+            # structural: no future producer can reintroduce the divergence,
+            # and it covers fields the convention never reached (entity_details
+            # confidence of exactly 1.0, user-supplied metadata, timing).
+            #
+            # NOT a hash-semantics change: the canonicaliser is untouched, and
+            # chains written before this still verify, because their stored
+            # bytes are unchanged and Python re-reads "0.0" as a float.
+            entry_data = _collapse_whole_floats(entry_data)
 
             # Compute entry hash (includes prev_hash for chain integrity)
             entry_hash = self._compute_hash(entry_data)
