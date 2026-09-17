@@ -1,4 +1,4 @@
-﻿"""
+"""
 Tests for OpenAI SDK middleware integration.
 
 Run: pytest tests/test_openai_middleware.py -v

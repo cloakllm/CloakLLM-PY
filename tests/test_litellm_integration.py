@@ -1,4 +1,4 @@
-﻿"""Integration tests for LiteLLM middleware with streaming support."""
+"""Integration tests for LiteLLM middleware with streaming support."""
 
 import asyncio
 import sys

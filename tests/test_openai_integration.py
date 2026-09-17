@@ -1,4 +1,4 @@
-﻿"""Integration tests for OpenAI SDK middleware with incremental streaming."""
+"""Integration tests for OpenAI SDK middleware with incremental streaming."""
 
 import asyncio
 import tempfile
