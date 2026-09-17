@@ -5,6 +5,18 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.2] - 2026-09-17
+
+### Fixed
+- **Cross-SDK: Python-written audit chains now verify in the JavaScript SDK.** A hashed float that lands on a whole number serialises as `0.0` in Python and `0` in JavaScript -- the same number, different canonical bytes, and therefore a different SHA-256, so a genuine Python chain was reported as *tampered* by the JS verifier. The convention "producers pass `int 0`, not `float 0.0`" already existed and was honoured at the Article 4a bias sites, but never on the core `log()` path, where `latency_ms` **defaults** to `0.0` and timing values round to `0.0` for any sub-millisecond operation. The verifier README called this intermittent; it was not -- a plain five-entry run had **four of five entries unverifiable across SDKs**. Whole-valued floats are now collapsed to ints at the audit write boundary, which makes the guarantee structural (no future producer can reintroduce it) and covers fields the convention never reached: an `entity_details` confidence of exactly `1.0`, user-supplied `metadata`, and every `timing` value. `bool` is untouched -- it subclasses `int` but not `float`, so collapsing it would corrupt the schema's boolean fields. **Not a hash-semantics change:** the canonicaliser is unmodified and pre-0.12.2 chains still verify, because their stored bytes are unchanged. Chains written *before* 0.12.2 remain affected and must still be verified with the same-language verifier that produced them. Narrower than an RFC 8785 migration, which remains tracked separately -- but it removes the case that actually bites. Regression-guarded in `tests/test_cross_sdk_whole_floats.py`.
+- **`cryptography` floor raised past PYSEC-2026-3552.** The constraint was `>=48.0.1,<50.0.0` and the fix is `50.0.0`, so **the cap blocked its own fix** -- the same trap as v0.10.1. This one reached users: `timestamping` is a shipped extra, so anyone installing `cloakllm[timestamping]` resolved a vulnerable `cryptography` and could not upgrade without violating the published constraint. Now `>=50.0.0,<51.0.0`.
+
+### Added
+- **Article 50: `audible_notice` and `other` accepted as `disclosure_method`.** Article 50 deliberately declines to enumerate marking techniques, so the whitelist cannot drift against the *law* -- but a closed enum will always lag *practice*. The Commission contemplates "visible or audible" labels, and a deployer disclosing an audio deepfake audibly had no accurate value: they had to misrepresent it as `visible_notice` or fail validation. `other` is the escape hatch that keeps the list closed (these whitelists exist to keep junk and PII out of the log) without forecasting future techniques. Speculative values such as `fingerprint` are still rejected, and a test asserts it. Purely additive: old records validate unchanged, no schema bump, no hash-semantics change.
+
+### Changed
+- Every GitHub Action in CI and publishing workflows is now pinned to a commit SHA; the test matrix adds Python 3.13 and 3.14.
+
 ## [0.12.1] - 2026-07-07
 
 ### Fixed
