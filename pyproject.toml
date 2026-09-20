@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cloakllm"
-version = "0.12.4"
-description = "AI Compliance Middleware ג€” PII protection, tamper-evident audit logs, and EU AI Act compliance for LLM gateways"
+version = "0.12.6"
+description = "AI Compliance Middleware -- PII protection, tamper-evident audit logs, and EU AI Act compliance for LLM gateways"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
@@ -38,9 +38,9 @@ dependencies = []
 # `pip install cloakllm[detection]` path always yields a working spaCy.
 detection = ["spacy>=3.7.0", "click>=8.0"]
 # v0.6.1 H6: bumped litellm floor to 1.83.0 (CVE-2026-35029, -35030, GHSA-69x8-hrgq-fjj8 fixed in 1.83.0).
-# v0.6.3 P0-1: pin aiohttp>=3.13.4 (litellm transitive) ג€” fixes 10 CVEs in aiohttp 3.13.3
+# v0.6.3 P0-1: pin aiohttp>=3.13.4 (litellm transitive) -- fixes 10 CVEs in aiohttp 3.13.3
 # (CVE-2026-34513..34520, CVE-2026-22815, CVE-2026-34525). All fixed in aiohttp 3.13.4.
-# v0.6.5: pin python-dotenv>=1.2.2 (litellm transitive) ג€” fixes CVE-2026-28684.
+# v0.6.5: pin python-dotenv>=1.2.2 (litellm transitive) -- fixes CVE-2026-28684.
 # Carried forward into v0.7.0 published wheel metadata.
 litellm = [
     "litellm>=1.83.0,<2.0.0",

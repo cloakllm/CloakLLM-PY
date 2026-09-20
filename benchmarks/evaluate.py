@@ -1,4 +1,4 @@
-"""Detection Benchmark Harness — measures recall/precision/F1 per category."""
+"""Detection Benchmark Harness -- measures recall/precision/F1 per category."""
 
 from __future__ import annotations
 
@@ -104,7 +104,7 @@ def evaluate(shield: Shield, corpus: list[dict]) -> dict:
         matched_gt: set[int] = set()
         matched_det: set[int] = set()
 
-        # Greedy 1:1 matching — first match wins
+        # Greedy 1:1 matching -- first match wins
         for di, det in enumerate(detections):
             for gi, gt in enumerate(ground_truth):
                 if gi in matched_gt:

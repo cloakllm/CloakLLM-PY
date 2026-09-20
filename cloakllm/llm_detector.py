@@ -11,7 +11,7 @@ SECURITY NOTE: LLM-based detection is advisory and non-deterministic.
 It must never be the sole detection mechanism. The LLM may miss entities
 or hallucinate false detections. Always use in combination with regex
 and NER detection (Pass 1 and Pass 2). The LLM prompt is not hardened
-against prompt injection — adversarial input text could manipulate results.
+against prompt injection -- adversarial input text could manipulate results.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ LLM_CATEGORIES = frozenset({
     "NATIONAL_ID", "BIOMETRIC", "USERNAME", "PASSWORD", "VEHICLE",
 })
 
-# Categories already covered by regex or spaCy — LLM should NOT detect these
+# Categories already covered by regex or spaCy -- LLM should NOT detect these
 EXCLUDED_CATEGORIES = frozenset({
     "EMAIL", "PHONE", "SSN", "CREDIT_CARD", "IP_ADDRESS",
     "API_KEY", "IBAN", "JWT", "ORG", "GPE", "PERSON",
@@ -99,8 +99,8 @@ _PRIVATE_NETWORKS = [
 _ALWAYS_DENY_NETWORKS = [
     ipaddress.ip_network("169.254.0.0/16"),    # IPv4 link-local + AWS/GCP/Azure IMDS
     ipaddress.ip_network("100.64.0.0/10"),     # Carrier-grade NAT (covers Alibaba 100.100.100.200)
-    ipaddress.ip_network("192.0.0.0/24"),      # IETF protocol assignments — covers Oracle Cloud IMDS at 192.0.0.192
-    ipaddress.ip_network("0.0.0.0/8"),         # "this network" — 0.0.0.0 aliases to localhost on Linux
+    ipaddress.ip_network("192.0.0.0/24"),      # IETF protocol assignments -- covers Oracle Cloud IMDS at 192.0.0.192
+    ipaddress.ip_network("0.0.0.0/8"),         # "this network" -- 0.0.0.0 aliases to localhost on Linux
     ipaddress.ip_network("224.0.0.0/4"),       # IPv4 multicast
     ipaddress.ip_network("240.0.0.0/4"),       # IPv4 reserved (future use)
     ipaddress.ip_network("::/128"),            # IPv6 unspecified
@@ -118,7 +118,7 @@ _ALWAYS_DENY_NETWORKS = [
 
 # v0.6.3 SEC-1: HTTP redirect SSRF bypass.
 #
-# urllib.request.urlopen() installs an HTTPRedirectHandler by default — a
+# urllib.request.urlopen() installs an HTTPRedirectHandler by default -- a
 # malicious Ollama server at a permitted IP can respond with
 #     HTTP/1.1 301 Moved Permanently
 #     Location: http://169.254.169.254/latest/meta-data/iam/...
@@ -129,7 +129,7 @@ _ALWAYS_DENY_NETWORKS = [
 #
 # Defense: build an opener with a custom HTTPRedirectHandler that REFUSES
 # all redirects. The Ollama API never legitimately returns 3xx for /api/tags
-# or /api/chat — any redirect is either misconfiguration or an attack.
+# or /api/chat -- any redirect is either misconfiguration or an attack.
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     """v0.6.3 SEC-1: refuse all 3xx redirects to prevent SSRF bypass.
 
@@ -141,7 +141,7 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise urllib.error.URLError(
             f"CloakLLM: Ollama server returned a {code} redirect to "
-            f"{newurl!r}. Refusing for SSRF protection — the H2 IP blocklist "
+            f"{newurl!r}. Refusing for SSRF protection -- the H2 IP blocklist "
             f"is bypassable if redirects are followed. If your Ollama "
             f"deployment legitimately needs redirects, configure it to serve "
             f"the final URL directly."
@@ -150,7 +150,7 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 # Module-level opener: built once, reused for all Ollama HTTP calls in this
 # process. Including the standard handlers ensures cookies/auth/etc still
-# work normally — only redirects are refused.
+# work normally -- only redirects are refused.
 _NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler())
 
 
@@ -197,7 +197,7 @@ def _validate_ollama_url(url: str, allow_remote: bool) -> str:
     integer/octal IPv4 forms (`http://2130706433/`) go through the same
     `_check_ip_allowed` filter as any other input.
 
-    All resolved addresses must pass — if a hostname returns both an
+    All resolved addresses must pass -- if a hostname returns both an
     allowed and a denied IP, the request is rejected (the underlying
     HTTP client may pick either, so we fail closed).
     """
@@ -312,7 +312,7 @@ class LlmDetector:
         self._custom_categories: dict[str, str] = {}
         for name, desc in getattr(config, 'custom_llm_categories', []):
             if name in EXCLUDED_CATEGORIES:
-                logger.warning("Custom LLM category '%s' conflicts with excluded category — skipped", name)
+                logger.warning("Custom LLM category '%s' conflicts with excluded category -- skipped", name)
                 continue
             self._custom_categories[name] = desc
 
@@ -328,8 +328,8 @@ class LlmDetector:
     def _http_open(self, req, *, timeout):
         """v0.6.3 SEC-1: single seam for all HTTP calls so tests can patch
         one method, and SEC-1's no-redirect handler is enforced
-        consistently. Production code MUST call this — never
-        urllib.request.urlopen directly — so a malicious Ollama can't
+        consistently. Production code MUST call this -- never
+        urllib.request.urlopen directly -- so a malicious Ollama can't
         301-redirect us to cloud metadata."""
         return _NO_REDIRECT_OPENER.open(req, timeout=timeout)
 
@@ -341,7 +341,7 @@ class LlmDetector:
         `ollama.example.com` at a private/allowed IP at init time can't flip
         their authoritative DNS to `169.254.169.254` before the actual fetch.
 
-        On failure, raises `ValueError` — callers (`_check_available`,
+        On failure, raises `ValueError` -- callers (`_check_available`,
         `_query_ollama`) catch and treat as "Ollama unavailable" to keep the
         detector fail-soft (consistent with regex/NER passes still running).
         """
@@ -359,7 +359,7 @@ class LlmDetector:
             self._http_open(req, timeout=3)
             self._available = True
         except Exception:
-            logger.warning("Ollama not available at %s — LLM detection disabled", self._base_url)
+            logger.warning("Ollama not available at %s -- LLM detection disabled", self._base_url)
             self._available = False
         return self._available
 
@@ -415,7 +415,7 @@ class LlmDetector:
         try:
             self._revalidate_url()  # v0.6.3 H2: DNS rebinding mitigation
             # v0.6.3 SEC-1: route through _http_open (same seam as
-            # _check_available — tests patch one method, redirects refused).
+            # _check_available -- tests patch one method, redirects refused).
             resp = self._http_open(req, timeout=self._timeout)
             body = json.loads(resp.read())
             content = body.get("message", {}).get("content", "{}")

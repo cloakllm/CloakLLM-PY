@@ -5,6 +5,27 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.6] - 2026-09-20
+
+Patch release. Re-aligns the three packages on one version number after v0.12.5 shipped to npm alone: that was a JavaScript-only crash fix, so Python and MCP correctly stayed at 0.12.4 and there is no 0.12.5 for them.
+
+Everything here came out of a full-workspace audit (`AUDIT_endtoend_2026-09-20.md`), commissioned because five defects had been found in one day by a person using the product rather than by any test.
+
+### Fixed
+- **A NER guess could outrank a category you defined.** Pass order in the detection pipeline *is* precedence -- whichever pass claims a span keeps it -- and the order was regex -> NER -> LLM. So a probabilistic name guess took spans out from under explicitly configured categories: with `custom_llm_categories=[("PATIENT_ID", ...)]`, the text `"Patient John Smith-99 was admitted"` came back as `[PERSON_0]` rather than `[PATIENT_ID_0]`, because spaCy claims `John Smith-99` as a single PERSON. **No PII leaked** -- the value is still tokenised either way -- but you asked for PATIENT_ID and silently got PERSON, which corrupts `entity_details` and anything downstream keyed on the category. The order is now **regex -> LLM -> NER**: regex stays first because it is structural and the most certain, an explicitly configured category is a stronger statement of intent than a probabilistic guess, and NER is the fuzziest pass so it goes last. Safe because the two do not compete -- `llm_detector.EXCLUDED_CATEGORIES` already holds PERSON/ORG/GPE and the prompt says not to emit them, so the LLM cannot take NER's categories by going first. Found in the JS SDK, where `compromise` exposed it on a simpler input; Python had the identical latent flaw and is fixed in the same round, because a precedence difference between the SDKs would itself be a cross-SDK divergence.
+- **Two log messages would crash a non-UTF-8 Windows console.** `llm_detector.py` emitted em dashes inside `logger.warning` calls. Every other printed string in the SDK was already ASCII; these two were the last, and they sit in the module this release reorders.
+- **The PyPI package description had become mojibake in the source tree.** `pyproject.toml` carried a cp1255-mangled em dash where the published 0.12.4 has a correct one, so this release would have corrupted the public package page. Both descriptions are now plain ASCII.
+
+### Testing
+- **Five tests had never run, including the regulatory wire contract.** `jsonschema` was in no extra at all, so the four tests validating `examples/compliance_report_schema.json` -- the contract an auditor consumes -- skipped locally *and* in CI. `reportlab` lives only in the `[reporting]` extra, which CI did not install, so `render_pdf` was tested nowhere either. Both are now installed in CI: **1099 -> 1104 passing, 14 -> 9 skipped**, and the nine that remain are genuine Windows-only platform gaps (POSIX permissions, symlinks). All five passed the moment they could run.
+- New `tests/test_detection_precedence.py` drives the whole Shield rather than `LlmDetector` on its own -- the pre-existing custom-category tests called the detector directly, which is why no ordering bug could ever have shown up in them. The first test asserts the *premise* (that spaCy really does claim that span), so the guard cannot quietly go vacuous if the model changes.
+
+### Changed
+- **The detection benchmark was mismeasuring itself.** Overall precision read 83.0% and ORG precision 33.3%; both were artifacts. Each corpus sample annotates the entity it is *testing*, not everything it contains -- `"Old Visa: 4222222222222."` is tagged `regex` and labels only the card, but Visa is a real organisation, as are Google, UK and Berlin elsewhere. Those correct detections were counted as false positives. NER categories are now scored only where the corpus makes a claim about them: `ner` and `multi` samples annotate them properly, and `negative` samples contain no PII at all so a hit there is a genuine false positive, while `regex` and `adversarial` samples are silent about names and no longer credit or penalise. **P=83.0% -> 94.9%, R unchanged at 99.1%.** Detection did not change; the ruler did. `benchmarks/evaluate.js` carries the identical rule, because two SDKs that measure themselves differently publish numbers nobody can compare.
+
+### Unchanged and re-verified
+Suite at **1108 passing, 9 skipped**. Hard-corpus FAIR-slice scrub **97.7% with zero partial leaks**; cross-SDK regex differential **0 divergences across 198 inputs**; no-PII-in-logs 11/11. bandit clean at `-ll`, 0 HIGH and 0 MEDIUM.
+
 ## [0.12.4] - 2026-09-20
 
 ### Fixed
