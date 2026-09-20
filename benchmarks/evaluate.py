@@ -72,8 +72,34 @@ def evaluate(shield: Shield, corpus: list[dict]) -> dict:
     sample_results = []
 
     for sample in corpus:
-        detections, _ = shield.detector.detect(sample["text"])
+        all_dets, _ = shield.detector.detect(sample["text"])
         ground_truth = sample["entities"]
+
+        # Score a NER-category detection only where the corpus actually makes
+        # a claim about names, orgs and places.
+        #
+        # Each sample annotates the entity it is TESTING, not everything it
+        # contains. "Old Visa: 4222222222222." is tagged `regex` and labels
+        # only the card -- but Visa is a real organisation, as are Google, UK
+        # and Berlin elsewhere. Counting those as false positives punishes the
+        # engine for being right about something nobody wrote down, and it is
+        # why ORG precision read 33% here and overall precision 83%.
+        #
+        # `ner` and `multi` annotate NER entities properly, so they score.
+        # `negative` scores too: those samples contain no PII at all and
+        # assert nothing is found, so a NER hit there is a real false
+        # positive. `regex` and `adversarial` are silent about names, so
+        # their NER detections are neither credited nor penalised.
+        #
+        # Mirrors benchmarks/evaluate.js exactly. The two SDKs must measure
+        # themselves the same way or their published numbers are not
+        # comparable.
+        _SCORED = {"ner", "multi", "negative"}
+        ner_scored = bool(_SCORED & set(sample.get("tags", [])))
+        detections = (
+            all_dets if ner_scored
+            else [d for d in all_dets if d.category not in NER_CATEGORIES]
+        )
 
         matched_gt: set[int] = set()
         matched_det: set[int] = set()

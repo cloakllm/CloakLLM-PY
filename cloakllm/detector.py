@@ -294,17 +294,40 @@ class DetectionEngine:
         from cloakllm.backends.ner import NerBackend
         from cloakllm.backends.llm import LlmBackend
 
+        # Order is precedence: a pass that claims a span first keeps it.
+        #
+        # regex -> LLM -> NER, and the LLM pass moved ahead of NER on
+        # 2026-09-20. It used to run last, so a generic NER guess could take
+        # a span out from under a category the USER had explicitly defined.
+        # spaCy claims "John Smith-99" as one PERSON, so a custom PATIENT_ID
+        # of exactly that value never got the span.
+        #
+        # Not a leak -- the value is still tokenised -- but the person asked
+        # for PATIENT_ID and silently got PERSON, which corrupts
+        # entity_details and anything downstream keyed on the category.
+        #
+        # Regex stays first: structural and the most certain. An explicitly
+        # configured category is a stronger statement of intent than a
+        # probabilistic name guess, so it outranks NER. NER is the fuzziest
+        # pass and now goes last.
+        #
+        # Safe because the two do not compete: llm_detector.EXCLUDED_CATEGORIES
+        # already contains PERSON/ORG/GPE and the prompt says not to emit
+        # them, so the LLM cannot steal NER's categories by going first.
+        #
+        # Found in the JS SDK, where compromise exposed it on a simpler input
+        # ("Patient PAT-12345"). Fixed in both, together, because a
+        # precedence difference between the SDKs is a cross-SDK divergence.
+
         # Pass 1: Regex (always)
         self._backends.append(RegexBackend(self.config))
 
-        # Pass 2: NER (always -- lazy-loads spaCy)
-        ner_backend = NerBackend(self.config)
-        self._backends.append(ner_backend)
-
-        # Pass 3: LLM (opt-in)
+        # Pass 2: LLM (opt-in)
         if self.config.llm_detection:
-            llm_backend = LlmBackend(self.config)
-            self._backends.append(llm_backend)
+            self._backends.append(LlmBackend(self.config))
+
+        # Pass 3: NER (always -- lazy-loads spaCy)
+        self._backends.append(NerBackend(self.config))
 
     # --- Backward compatibility properties ---
 
