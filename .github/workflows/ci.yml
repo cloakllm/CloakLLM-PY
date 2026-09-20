@@ -72,7 +72,7 @@ jobs:
 
       # v0.6.5: Build the wheel and import it from a fresh venv. The cloakllm
       # py CI already exercises real spaCy / litellm via `pip install -e ...`
-      # so the upstream-API-drift class of bug is mostly caught ג€” but a wheel
+      # so the upstream-API-drift class of bug is mostly caught -- but a wheel
       # built with broken metadata (missing files, wrong package_data) would
       # only surface on user installs. This step closes that gap.
       #
