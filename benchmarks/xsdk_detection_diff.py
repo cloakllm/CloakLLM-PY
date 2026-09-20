@@ -50,6 +50,17 @@ EXTRA = [
     "bad checksum 4111111111111112 is not a card",
     "maestro 5018111111111112 is deliberately uncovered",
     "isbn 9780306406157 and order 1234567890123456 are not cards",
+    # v0.12.4 contiguous phones: the context gate is hand-mirrored too, so
+    # a divergence here means one SDK gates where the other does not.
+    "call 4155550199 tomorrow and phone: 2125551234",
+    "reach me on 2125551234 or call him at 4155550199",
+    "phone number is 2125551234, my cell number 4155550199",
+    "the Sydney office is +61291234567 and +442071838750 out of hours",
+    "order number 1234567890 and reference number 9876543210 are not phones",
+    "call about order 9876543210 is not a phone number",
+    "invoice 2026091912 paid, ticket 5551234567 closed",
+    "call 5550104422 has an impossible exchange",
+    "Pi is 3.14159265 and the ratio was 16:9",
     "SSN123456789 contiguous and 123-45-6789 dashed",
     "Bearer eyJhbGciOiJIUzI1NiJ9.eyJhIjoxfQ.abcDEF_123-xyz",
     "AKIAIOSFODNN7EXAMPLE and akia not a key",

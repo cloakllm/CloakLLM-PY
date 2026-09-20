@@ -204,10 +204,15 @@ def test_the_default_config_false_positive_rate_is_recorded():
     # rediscovering it, and so a regression in ANY category shows up.
     from cloakllm import Shield, ShieldConfig
 
+    # v0.12.4 removed "semver-ish build" from this set: its 8-digit prefix
+    # used to be read as a PHONE, and the contiguous-phone context gate
+    # drops bare digit runs with no keyword near them. The set shrinking is
+    # the gate working -- and this assertion going red is it being noticed
+    # rather than absorbed.
     default = Shield(ShieldConfig(audit_enabled=False))
     hits = sorted(label for label, text in NOT_PII
                   if categories(default, text))
-    assert hits == ["git sha", "non-Luhn 16 digit", "semver-ish build"], (
+    assert hits == ["git sha", "non-Luhn 16 digit"], (
         "the default-config false-positive set changed: %s" % hits)
 
 

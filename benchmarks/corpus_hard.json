@@ -679,6 +679,93 @@
       "tags": [
         "format-variant"
       ]
+    },
+    {
+      "id": "hard_046",
+      "text": "Please call 4155550199 before noon",
+      "entities": [
+        {
+          "start": 12,
+          "end": 22,
+          "category": "PHONE",
+          "value": "4155550199"
+        }
+      ],
+      "tags": [
+        "realistic",
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_047",
+      "text": "Reach me on 2125551234 any time",
+      "entities": [
+        {
+          "start": 12,
+          "end": 22,
+          "category": "PHONE",
+          "value": "2125551234"
+        }
+      ],
+      "tags": [
+        "realistic",
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_048",
+      "text": "The Sydney office is +61291234567",
+      "entities": [
+        {
+          "start": 21,
+          "end": 33,
+          "category": "PHONE",
+          "value": "+61291234567"
+        }
+      ],
+      "tags": [
+        "realistic",
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_049",
+      "text": "Escalations go to +442071838750 out of hours",
+      "entities": [
+        {
+          "start": 18,
+          "end": 31,
+          "category": "PHONE",
+          "value": "+442071838750"
+        }
+      ],
+      "tags": [
+        "realistic"
+      ]
+    },
+    {
+      "id": "hard_050",
+      "text": "Order number 1234567890 shipped on Tuesday",
+      "entities": [],
+      "tags": [
+        "hard-negative"
+      ]
+    },
+    {
+      "id": "hard_051",
+      "text": "The build is 20260919123456 and the run id is 1726660800000",
+      "entities": [],
+      "tags": [
+        "hard-negative"
+      ]
+    },
+    {
+      "id": "hard_052",
+      "text": "Reference number 9876543210 was filed under invoice 2026091912",
+      "entities": [],
+      "tags": [
+        "hard-negative"
+      ]
     }
   ]
 }

@@ -39,7 +39,7 @@ _NER_LABEL_MAP = {
     "GPE": "GPE",
     "FAC": "FAC",
     "NORP": "NORP",
-    "LOC": "GPE",       # Both WikiNER LOC and OntoNotes LOC → GPE
+    "LOC": "GPE",       # Both WikiNER LOC and OntoNotes LOC -> GPE
     # WikiNER (de, fr, es, it, pt, ru)
     "PER": "PERSON",
     "MISC": "MISC",
@@ -64,6 +64,38 @@ class Detection:
     end: int           # End character offset in original string
     confidence: float  # 0.0-1.0 confidence score
     source: str        # "regex", "ner", or "llm"
+
+
+# v0.12.4: a bare digit run only counts as a phone number when something
+# nearby says so. Anchored to the end of the preceding window, so "call
+# about order 9876543210" does NOT qualify -- the keyword has to be next to
+# the number, not merely in the sentence.
+PHONE_CONTEXT_RE = re.compile(
+    r"(?:call(?:ed|ing)?|phone|telephone|tel|mobile|cell|fax|contact|"
+    r"reach|dial|ring|whatsapp|sms|text)"
+    # Up to two short filler words may sit between the keyword and the
+    # number, because "reach me on", "call him at" and "contact us on" are
+    # how people write. The 4-character cap is what keeps it honest: it
+    # admits me/him/her/us/at/on/is, and refuses "about", "order",
+    # "invoice", "ticket" and "reference". "number" is allowed explicitly
+    # -- "phone number is X" is too common to miss -- and is safe because
+    # it is only ever reached AFTER a phone keyword, so "order number X"
+    # and "reference number X" still have nothing to open the gate.
+    r"(?:\W+(?:\w{1,4}|numbers?)){0,2}"
+    r"\W{0,4}$",
+    re.IGNORECASE,
+)
+PHONE_CONTEXT_WINDOW = 28
+
+
+def has_phone_context(text: str, start: int) -> bool:
+    """Does a phone keyword sit immediately before this position?
+
+    Only consulted for CONTIGUOUS digit runs. A number written with
+    separators, or with a leading +, has already declared itself.
+    """
+    return bool(PHONE_CONTEXT_RE.search(
+        text[max(0, start - PHONE_CONTEXT_WINDOW):start]))
 
 
 def luhn_valid(number: str) -> bool:
@@ -146,7 +178,7 @@ PATTERNS: dict[str, tuple[str, str]] = {
         r"|3(?:0[0-5]\d|6\d{2}|8\d{2})([ -]?)\d{6}\3\d{4}"  # Diners, 14, 4-6-4
         r"|62\d{15,17})(?!\d)"                             # UnionPay, 17-19
     ),
-    # IBAN — MUST precede PHONE (v0.11.2). In the old order IBAN came AFTER
+    # IBAN -- MUST precede PHONE (v0.11.2). In the old order IBAN came AFTER
     # PHONE, so PHONE's finditer claimed the IBAN digit groups first (via
     # covered_spans), fragmenting "DE89 3704 0044 0532 0130 00" into PHONE
     # tokens + a leaked country code. Ordering it before PHONE lets IBAN claim
@@ -157,7 +189,7 @@ PATTERNS: dict[str, tuple[str, str]] = {
     ),
     # Phone numbers (international + US formats)
     # v0.6.1 H1.3: tightened from `(?:\(?\d{2,4}\)?[-.\s]?)?\d{3,4}[-.\s]?\d{3,4}\b`
-    # which had three optional adjacent digit groups → ambiguous parses on long
+    # which had three optional adjacent digit groups -> ambiguous parses on long
     # digit runs. The new pattern:
     #   - replaces `\b` boundaries with `(?<!\d)` / `(?!\d)` lookarounds (digit-only),
     #   - makes parenthesized area code REQUIRE both parens, and bare area code
@@ -170,10 +202,30 @@ PATTERNS: dict[str, tuple[str, str]] = {
         # leaked verbatim on the default (non-locale) config. Added a second
         # alternative for that shape (a leading 2-digit pair + 3-4 separated
         # 2-digit groups, separators REQUIRED so arbitrary digit runs don't match).
+        #
+        # v0.12.4: contiguous numbers -- no separators at all -- were
+        # COMPLETELY undetected, including every bare US 10-digit number.
+        # Two alternatives close that, and they are gated very differently:
+        #
+        #   E.164 (+4420...) needs no gate. A leading "+" is the writer
+        #   declaring this is a phone number; nothing else is shaped that way.
+        #
+        #   A bare NANP-shaped run does. "2026091912" is a plausible
+        #   Washington DC number AND a plausible invoice id, and roughly 64%
+        #   of random 10-digit ids satisfy the shape, so shape alone is a
+        #   false-positive engine. detect() therefore additionally requires a
+        #   phone keyword nearby -- regex proposes, code disposes, the same
+        #   split the Luhn check uses.
+        #
+        # NANP structure is real and does some of the work: area code and
+        # exchange both start 2-9 and neither may be N11 (411, 911, ...),
+        # which alone rejects every unix timestamp in seconds.
         r"(?<!\d)(?:"
         r"(?:\+\d{1,3}[-.\s])?(?:\(\d{2,4}\)[-.\s]?|\d{2,4}[-.\s])?\d{3,4}[-.\s]?\d{3,4}"
         r"|\d{2}(?:[-.\s]\d{2}){3,4}"
         r")(?!\d)"
+        r"|(?<![\d+])\+[1-9]\d{7,14}(?!\d)"
+        r"|(?<!\d)1?[2-9](?:0[1-9]|[1-9]\d)[2-9](?:0[1-9]|[1-9]\d)\d{4}(?!\d)"
     ),
     # IP addresses (IPv4 + IPv6). v0.11.2: IPv6 was entirely undetected before,
     # so a whole address (e.g. 2001:db8:85a3::8a2e:370:7334) leaked verbatim.
@@ -199,7 +251,7 @@ PATTERNS: dict[str, tuple[str, str]] = {
     # v0.6.1 F1: bounded upper at 512 to limit ReDoS exposure. Body now
     # includes `-` and `_` so multi-segment keys (Anthropic sk-ant-api03-...,
     # GitHub fine-grained github_pat_X_Y, AWS session tokens) are detected.
-    # Bounded character class — no backtracking risk despite broader match.
+    # Bounded character class -- no backtracking risk despite broader match.
     "API_KEY": (
         r"api_key",
         r"\b(?:sk|pk|api|key|token|secret|bearer)[-_]?[a-zA-Z0-9_-]{20,512}\b"
@@ -230,7 +282,7 @@ class DetectionEngine:
         self._backends: list = []
 
         if backends is not None:
-            # Custom pipeline — use provided backends as-is
+            # Custom pipeline -- use provided backends as-is
             self._backends = list(backends)
         else:
             # Default pipeline: regex -> NER -> LLM
@@ -245,7 +297,7 @@ class DetectionEngine:
         # Pass 1: Regex (always)
         self._backends.append(RegexBackend(self.config))
 
-        # Pass 2: NER (always — lazy-loads spaCy)
+        # Pass 2: NER (always -- lazy-loads spaCy)
         ner_backend = NerBackend(self.config)
         self._backends.append(ner_backend)
 
