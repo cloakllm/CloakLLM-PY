@@ -26,7 +26,17 @@ You are affected only if **all three** hold:
 2. you define `custom_llm_categories` / `customLlmCategories`, **and**
 3. a NER backend is actually installed -- spaCy via `cloakllm[detection]` on Python, `compromise` on JS -- **and** a custom value overlaps a span NER also claims.
 
-Without a NER backend there is nothing to shadow the span, so the output is unchanged. Verified against the previously published artifacts: npm `cloakllm@0.12.5` returns `Patient [PERSON_0]-12345 was admitted` **only when `compromise` is present**, and returns the correct `[PATIENT_ID_0]` without it. The JS exposure was therefore narrower than Python's, where spaCy arrives through a documented extra.
+Without a NER backend there is nothing to shadow the span, so the output is unchanged. **Measured on the published artifacts in both SDKs, not inferred:**
+
+| | no NER backend | NER backend installed |
+|---|---|---|
+| npm `cloakllm@0.12.5` | `[PATIENT_ID_0]` -- correct | `[PERSON_0]` -- affected |
+| PyPI `cloakllm==0.12.4` | `[PATIENT_ID_0]` -- correct | `[PERSON_0]` -- affected |
+| PyPI `cloakllm==0.12.6` + `[detection]` | -- | `[PATIENT_ID_0]` -- fixed |
+
+(The Python probe uses `John Smith-99` rather than `PAT-12345`: compromise tags `PAT` as a person, spaCy does not, so each SDK needs an input its own model actually claims.)
+
+In practice JS exposure was narrower, because `compromise` is an explicit `npm install` while spaCy arrives through the documented `cloakllm[detection]` extra -- but that is now an observation about install habits, not the load-bearing claim. The behaviour itself is identical in both SDKs.
 
 If you pinned an expected token in a test, re-run it. If you relied on the old ordering deliberately, you can restore it by passing an explicit `backends` pipeline (see Pluggable Detection Backends in the guide).
 
