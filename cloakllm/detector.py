@@ -66,6 +66,33 @@ class Detection:
     source: str        # "regex", "ner", or "llm"
 
 
+def luhn_valid(number: str) -> bool:
+    """Does this digit run pass the Luhn checksum every card issuer uses?
+
+    Applied to CREDIT_CARD matches so that a number which merely looks like
+    a card is not reported as one. Without it the standard test Visa with a
+    deliberately broken check digit (4111111111111112) was flagged, and the
+    first modal that fires on something obviously not a card is what makes
+    a user stop believing the next one.
+
+    Separators are ignored, so it works on "4111 1111 1111 1111" as written.
+    """
+    digits = [int(c) for c in number if c.isdigit()]
+    if len(digits) < 12:
+        return False
+    # Double every second digit counting from the RIGHT. Indexing from the
+    # left instead, that is every index congruent to len % 2.
+    parity = len(digits) % 2
+    total = 0
+    for index, digit in enumerate(digits):
+        if index % 2 == parity:
+            digit *= 2
+            if digit > 9:
+                digit -= 9
+        total += digit
+    return total % 10 == 0
+
+
 # --- Regex patterns ---
 # Ordered by specificity (most specific first to avoid false positives)
 
@@ -80,17 +107,44 @@ PATTERNS: dict[str, tuple[str, str]] = {
         r"ssn",
         r"\b(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}\b"
     ),
-    # Credit card numbers (Visa, MC, Amex, Discover).
+    # Credit card numbers.
     # v0.11.2: detect SPACE/DASH-grouped forms (how cards are normally written),
     # not just contiguous digits. Before this, "4111 1111 1111 1111" was missed
     # by CC and partially eaten by PHONE, leaking the trailing group into the
     # log. A backreferenced separator (\1 / \2) keeps grouping consistent and
     # avoids matching arbitrary digit runs. Must precede PHONE (it does) so the
     # full card span is claimed first via covered_spans.
+    #
+    # v0.12.3: the issuer list had stopped at Visa / 5-series Mastercard /
+    # Amex / Discover, so Luhn-valid cards on three live ranges were MISSED
+    # ENTIRELY -- a leak, not a false positive:
+    #   * Mastercard 2-series (2221-2720), issued since 2017
+    #   * JCB (3528-3589)
+    #   * UnionPay (62), the largest network in the world by volume
+    # Discover's 644-649 range was missing too. The recall benchmark could
+    # not have caught any of it: its corpus only held Visa, 5-series
+    # Mastercard and Amex.
+    #
+    # The prefixes stay explicit rather than becoming "any 13-19 digit run
+    # validated by Luhn". Luhn alone passes one in ten random digit runs,
+    # which on a developer's order ids and timestamps is a false-positive
+    # engine -- and in a warn-UI a false positive costs a person's attention.
+    # Prefix AND checksum, not either alone.
+    # Maestro (50, 56-69, 12-19 digits) is deliberately NOT covered. Its
+    # range is so broad it overlaps most of the others and a great many
+    # ordinary numbers, and Luhn alone admits one in ten candidates -- so
+    # adding it would buy a little recall for a lot of false positives.
+    # test_credit_card.py asserts the gap so it stays a decision.
     "CREDIT_CARD": (
         r"credit_card",
-        r"(?<!\d)(?:(?:4\d{3}|5[1-5]\d{2}|6011|65\d{2})([ -]?)\d{4}\1\d{4}\1\d{4}"
-        r"|3[47]\d{2}([ -]?)\d{6}\2\d{5})(?!\d)"
+        r"(?<!\d)(?:(?:4\d{3}|5[1-5]\d{2}"
+        r"|222[1-9]|22[3-9]\d|2[3-6]\d{2}|27[01]\d|2720"   # Mastercard 2-series
+        r"|352[89]|35[3-8]\d"                              # JCB
+        r"|6011|62\d{2}|64[4-9]\d|65\d{2}"                 # Discover, UnionPay
+        r")([ -]?)\d{4}\1\d{4}\1\d{4}"                     # 16 digits, 4-4-4-4
+        r"|3[47]\d{2}([ -]?)\d{6}\2\d{5}"                  # Amex, 15, 4-6-5
+        r"|3(?:0[0-5]\d|6\d{2}|8\d{2})([ -]?)\d{6}\3\d{4}"  # Diners, 14, 4-6-4
+        r"|62\d{15,17})(?!\d)"                             # UnionPay, 17-19
     ),
     # IBAN — MUST precede PHONE (v0.11.2). In the old order IBAN came AFTER
     # PHONE, so PHONE's finditer claimed the IBAN digit groups first (via

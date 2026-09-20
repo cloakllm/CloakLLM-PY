@@ -18,7 +18,7 @@
     },
     {
       "id": "hard_001",
-      "text": "From: \"Díaz, María\" <maria.diaz@empresa.es>\nSubject: factura",
+      "text": "From: \"D\u00edaz, Mar\u00eda\" <maria.diaz@empresa.es>\nSubject: factura",
       "entities": [
         {
           "start": 21,
@@ -50,7 +50,7 @@
     },
     {
       "id": "hard_003",
-      "text": "reach me — john dot doe at gmail dot com — thanks",
+      "text": "reach me \u2014 john dot doe at gmail dot com \u2014 thanks",
       "entities": [
         {
           "start": 11,
@@ -181,7 +181,7 @@
     },
     {
       "id": "hard_011",
-      "text": "Numéro: 06 12 34 56 78 (portable)",
+      "text": "Num\u00e9ro: 06 12 34 56 78 (portable)",
       "entities": [
         {
           "start": 8,
@@ -460,13 +460,13 @@
     },
     {
       "id": "hard_028",
-      "text": "Approved by François Lefèvre per the contract.",
+      "text": "Approved by Fran\u00e7ois Lef\u00e8vre per the contract.",
       "entities": [
         {
           "start": 12,
           "end": 28,
           "category": "PERSON",
-          "value": "François Lefèvre"
+          "value": "Fran\u00e7ois Lef\u00e8vre"
         }
       ],
       "tags": [
@@ -601,6 +601,83 @@
       "entities": [],
       "tags": [
         "hard-negative"
+      ]
+    },
+    {
+      "id": "hard_041",
+      "text": "Refund to Mastercard 2221 0000 0000 0009 processed",
+      "entities": [
+        {
+          "start": 21,
+          "end": 40,
+          "category": "CREDIT_CARD",
+          "value": "2221 0000 0000 0009"
+        }
+      ],
+      "tags": [
+        "realistic",
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_042",
+      "text": "JCB 3530 1113 3330 0000 on file",
+      "entities": [
+        {
+          "start": 4,
+          "end": 23,
+          "category": "CREDIT_CARD",
+          "value": "3530 1113 3330 0000"
+        }
+      ],
+      "tags": [
+        "realistic",
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_043",
+      "text": "UnionPay 6212345678901232 charged",
+      "entities": [
+        {
+          "start": 9,
+          "end": 25,
+          "category": "CREDIT_CARD",
+          "value": "6212345678901232"
+        }
+      ],
+      "tags": [
+        "realistic"
+      ]
+    },
+    {
+      "id": "hard_044",
+      "text": "Diners 3601 111111 1113 declined",
+      "entities": [
+        {
+          "start": 7,
+          "end": 23,
+          "category": "CREDIT_CARD",
+          "value": "3601 111111 1113"
+        }
+      ],
+      "tags": [
+        "format-variant"
+      ]
+    },
+    {
+      "id": "hard_045",
+      "text": "Discover 6441 1111 1111 1117 authorised",
+      "entities": [
+        {
+          "start": 9,
+          "end": 28,
+          "category": "CREDIT_CARD",
+          "value": "6441 1111 1111 1117"
+        }
+      ],
+      "tags": [
+        "format-variant"
       ]
     }
   ]

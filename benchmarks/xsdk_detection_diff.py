@@ -38,6 +38,18 @@ EXTRA = [
     "IPv6 ::ffff:192.168.0.1 mapped", "fe80::1%eth0 scoped",
     "IBANs: NL91ABNA0417164300 and NL91 ABNA 0417 1643 00",
     "amex372 8 not a card; 378282246310005 is",
+    # v0.12.3 issuer ranges. These were added because a hand-mirrored regex
+    # is exactly where the two SDKs drift, and the widened BIN list plus the
+    # new Luhn gate touched both by hand.
+    "mastercard 2-series 2221000000000009 and edge 2720990000000007",
+    "just outside the range 2220000000000000 is not a card",
+    "jcb 3530111333300000 and edges 3528000000000007 / 3589000000000003",
+    "unionpay 6212345678901232 and 19-digit 6212345678901234569",
+    "diners 36011111111113 and 30011111111119",
+    "discover 6511111111111112 and 6441111111111117",
+    "bad checksum 4111111111111112 is not a card",
+    "maestro 5018111111111112 is deliberately uncovered",
+    "isbn 9780306406157 and order 1234567890123456 are not cards",
     "SSN123456789 contiguous and 123-45-6789 dashed",
     "Bearer eyJhbGciOiJIUzI1NiJ9.eyJhIjoxfQ.abcDEF_123-xyz",
     "AKIAIOSFODNN7EXAMPLE and akia not a key",
