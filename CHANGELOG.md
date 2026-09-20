@@ -16,6 +16,20 @@ Everything here came out of a full-workspace audit (`AUDIT_endtoend_2026-09-20.m
 - **Two log messages would crash a non-UTF-8 Windows console.** `llm_detector.py` emitted em dashes inside `logger.warning` calls. Every other printed string in the SDK was already ASCII; these two were the last, and they sit in the module this release reorders.
 - **The PyPI package description had become mojibake in the source tree.** `pyproject.toml` carried a cp1255-mangled em dash where the published 0.12.4 has a correct one, so this release would have corrupted the public package page. Both descriptions are now plain ASCII.
 
+### Behaviour change on upgrade
+
+The precedence fix above **changes sanitized output** for one configuration, so a patch upgrade can produce a different token than 0.12.4 did. This is the intended correction -- a probabilistic guess should never outrank a category you configured -- but it is user-visible, and a test asserting the old token will fail.
+
+You are affected only if **all three** hold:
+
+1. `llm_detection=True` (Python) / `llmDetection: true` (JS), **and**
+2. you define `custom_llm_categories` / `customLlmCategories`, **and**
+3. a NER backend is actually installed -- spaCy via `cloakllm[detection]` on Python, `compromise` on JS -- **and** a custom value overlaps a span NER also claims.
+
+Without a NER backend there is nothing to shadow the span, so the output is unchanged. Verified against the previously published artifacts: npm `cloakllm@0.12.5` returns `Patient [PERSON_0]-12345 was admitted` **only when `compromise` is present**, and returns the correct `[PATIENT_ID_0]` without it. The JS exposure was therefore narrower than Python's, where spaCy arrives through a documented extra.
+
+If you pinned an expected token in a test, re-run it. If you relied on the old ordering deliberately, you can restore it by passing an explicit `backends` pipeline (see Pluggable Detection Backends in the guide).
+
 ### Testing
 - **Five tests had never run, including the regulatory wire contract.** `jsonschema` was in no extra at all, so the four tests validating `examples/compliance_report_schema.json` -- the contract an auditor consumes -- skipped locally *and* in CI. `reportlab` lives only in the `[reporting]` extra, which CI did not install, so `render_pdf` was tested nowhere either. Both are now installed in CI: **1099 -> 1104 passing, 14 -> 9 skipped**, and the nine that remain are genuine Windows-only platform gaps (POSIX permissions, symlinks). All five passed the moment they could run.
 - New `tests/test_detection_precedence.py` drives the whole Shield rather than `LlmDetector` on its own -- the pre-existing custom-category tests called the detector directly, which is why no ordering bug could ever have shown up in them. The first test asserts the *premise* (that spaCy really does claim that span), so the guard cannot quietly go vacuous if the model changes.
