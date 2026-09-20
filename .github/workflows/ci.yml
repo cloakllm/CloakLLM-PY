@@ -52,7 +52,13 @@ jobs:
         # ships on GitHub runners.
         # v0.12.0: spaCy moved to the [detection] extra -- CI must request it
         # explicitly or the NER suite silently skips + `spacy download` fails.
-        run: pip install -e ".[dev,litellm,timestamping,detection]"
+        # 2026-09-20 audit: `reporting` added for the same reason. reportlab
+        # lives only in that extra, so render_pdf -- a SHIPPED feature -- was
+        # tested nowhere. The comment above already named this hazard for
+        # spaCy; it was true of two more extras at the same time. The rule is
+        # general: if an optional extra has tests, CI installs it, or those
+        # tests are decoration.
+        run: pip install -e ".[dev,litellm,timestamping,detection,reporting]"
 
       - name: Download spaCy model
         run: python -m spacy download en_core_web_sm

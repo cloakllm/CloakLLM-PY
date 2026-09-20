@@ -71,7 +71,13 @@ kms = [
 # NER should always run (without spacy, the NER tests silently skip and a
 # contributor can green the suite while never exercising the NER paths).
 dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "cryptography>=50.0.0,<51.0.0", "pip-audit>=2.7",
-       "spacy>=3.7.0", "click>=8.0"]
+       "spacy>=3.7.0", "click>=8.0",
+       # jsonschema validates examples/compliance_report_schema.json -- the
+       # wire contract an auditor consumes. It was in no extra at all, so the
+       # four tests that check it skipped locally AND in CI: the contract
+       # defining our regulatory output was enforced nowhere. Found by audit
+       # 2026-09-20; all four pass once it is installed.
+       "jsonschema>=4.0"]
 # NOTE: `all` deliberately EXCLUDES the [kms] extra (5 heavy cloud SDKs for a
 # feature that is still experimental/disabled since v0.6.1) and [dev] tooling.
 all = [
