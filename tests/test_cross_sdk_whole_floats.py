@@ -19,6 +19,28 @@ from cloakllm.audit import AuditLogger, _collapse_whole_floats
 from cloakllm.config import ShieldConfig
 
 
+def _whole_floats(node, path="entry"):
+    """Every float in a parsed entry that holds a whole value, with its path.
+
+    These are the values that serialise as "N.0" in Python and "N" in
+    JavaScript, which is what made a genuine chain read as tampered.
+    """
+    found = []
+    if isinstance(node, bool):
+        return found          # bool subclasses int, never a float
+    if isinstance(node, float):
+        if node.is_integer():
+            found.append("%s=%r" % (path, node))
+        return found
+    if isinstance(node, dict):
+        for key, value in node.items():
+            found += _whole_floats(value, "%s.%s" % (path, key))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            found += _whole_floats(value, "%s[%d]" % (path, index))
+    return found
+
+
 class TestCollapseWholeFloats:
     def test_whole_floats_become_ints(self):
         assert _collapse_whole_floats(0.0) == 0
@@ -85,10 +107,23 @@ class TestWrittenEntriesAreJsCompatible:
 
         lines = self._entries(tmp_path)
         assert lines, "nothing was written"
-        for raw, _ in lines:
-            # A literal "N.0" anywhere in the serialised entry is the defect.
-            assert ".0" not in raw.replace('"', ""), (
-                "whole-valued float written verbatim: %s" % raw)
+        for raw, parsed in lines:
+            # Checked by parsing rather than by substring, because a
+            # substring check on the serialised line cannot tell a float
+            # from a timestamp. The original assertion was
+            # `".0" not in raw.replace('"', "")`, which also matched the
+            # microsecond field of any entry written in a fraction starting
+            # with a zero -- "...T04:39:49.027814+00:00". Measured at 11.7%
+            # over 300 runs, every one of them a false alarm, on the very
+            # test that guards the cross-SDK invariant.
+            #
+            # json.loads maps "0" to int and "0.0" to float, so this is a
+            # direct reading of the property: no float in a written entry
+            # may hold a whole value.
+            offenders = _whole_floats(parsed)
+            assert not offenders, (
+                "whole-valued float(s) written verbatim at %s in: %s"
+                % (offenders, raw))
 
     def test_the_chain_still_verifies_in_python(self, tmp_path):
         logger = AuditLogger(ShieldConfig(
