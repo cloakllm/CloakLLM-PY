@@ -5,6 +5,22 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.4] - 2026-09-20
+
+### Fixed
+- **Contiguous phone numbers were not detected at all.** A number written without separators -- including every bare US 10-digit number -- went straight through. The obvious fix is to match bare digit runs and it is a trap: measured against the false-positive corpus v0.12.3 introduced, a bare-run pattern lit up **6 of 12** ordinary developer strings. Roughly 64% of random 10-digit ids satisfy NANP shape, so `2026091912` is simultaneously a plausible Washington DC number and a plausible invoice id; shape alone cannot carry this. What ships instead, measured rather than guessed: **E.164 ungated** (a leading `+` is the writer declaring a phone number, not something inferred) plus **NANP-shaped runs gated on a keyword near the number** -- 6/6 recall, 0/12 false positives. The gate allows up to two filler words of at most four characters, because strict adjacency caught only 3 of 9 realistic phrasings ("reach me on", "call him at", "contact us on"); the four-character cap admits *me/him/her/us/at/on/is* and refuses *about/order/invoice/ticket/reference*. `number` is allowed explicitly, being far too common to miss, and is safe because it is only reachable *after* a phone keyword -- so "order number 1234567890" still has nothing to open the gate. Verified **purely additive** before any change: the only all-digit match the previous pattern made anywhere in the corpora was `14159265`, the digits of pi, which was itself a false positive -- so the gate cannot cost a real detection, and it removes one piece of noise.
+- **The ReDoS safety check failed open.** A pattern that failed it was *skipped*, leaving the process running with that category's detection switched off and only a warning to say so. For a built-in that cannot be provoked by user input -- it is a regression in CloakLLM, exactly as the message always said -- so **built-ins now raise `PatternSafetyError` rather than being skipped**. Custom patterns are still skipped with a warning, because a user's own regex must not be able to stop the SDK starting, and **locale patterns now warn** where that branch used to be a bare `pass`: the same fail-open with the volume at zero. Two budgets, because the check means two different things: **100ms** for a regex we did not write (a real boundary) and **1s** for our own (a regression canary). The split matters -- EMAIL costs ~16ms of CPU, so a tight budget combined with fail-closed would have turned merely slow hardware into an install that could not start. Catastrophic backtracking is exponential, so 1s still catches it with 64x of headroom on real patterns.
+
+### Added
+- **Phone shapes in the hard corpus**, which contained only *separated* numbers and so could not notice that contiguous ones were missed. Four contiguous/E.164 positives and three long-digit-run hard negatives, verified by running the new corpus against v0.12.3: FAIR scrub **97.7% -> 88.4%** and raw leaks **1 -> 5**, every one of them a phone number flowing verbatim. Same discipline as the card ranges: a new gate is only a gate once you have watched it go red.
+- **`detector.has_phone_context()`** and **`backends.regex.PatternSafetyError`**.
+- The cross-SDK differential covers the new phone cases and the context gate, which is hand-mirrored too: 198 inputs, 0 divergences.
+
+### Known limits, asserted by tests rather than left to memory
+- A bare digit run with no keyword anywhere near it is still missed, as is a contiguous *international* number without a `+`. Neither has a declaration nor NANP structure to go on.
+- `5550104422` is correctly **rejected** -- an exchange code cannot begin with 0, so it is not a valid number. It was carried for some time as *the* example of this gap; it never was one.
+- The safety check detects a slow pattern by **running** it, and Python's `re` cannot be interrupted, so a genuinely catastrophic *custom* pattern hangs construction rather than being reported. `custom_patterns` is operator config rather than untrusted input, so this is self-inflicted -- but it is a sharp edge and it is not fixed here.
+
 ## [0.12.3] - 2026-09-20
 
 ### Fixed
