@@ -152,6 +152,11 @@ def test_a_rejected_card_is_not_relabelled_as_something_else(shield):
 # Things a developer has in a chat window all day. The project measures
 # character-level scrub (recall) and had no false-positive measurement at
 # all, which is why a missing Luhn check was invisible to every gate.
+#
+# Two numbers come out of this corpus and they are not the same number:
+# CREDIT_CARD false positives regex-only (what this release fixed, now 0),
+# and false positives across every category in the default config (what a
+# user actually experiences, currently 3). Both are asserted below.
 NOT_PII = [
     ("ISBN-13", "see isbn 9780306406157"),
     ("ISBN-13 hyphenated", "isbn 978-0-306-40615-7"),
@@ -174,13 +179,36 @@ def test_ordinary_developer_strings_are_not_cards(shield, label, text):
     assert "CREDIT_CARD" not in categories(shield, text), label
 
 
-def test_false_positive_rate_is_zero_on_the_corpus(shield):
+def test_credit_card_false_positive_rate_is_zero_on_the_corpus(shield):
     # Stated as a number so a regression shows up as one. The first modal
     # that fires on something obviously not a card is what makes a user
     # stop believing the next one.
+    #
+    # Read the scope honestly: this counts CREDIT_CARD false positives, and
+    # `shield` here is regex-only. It is not the false-positive rate a user
+    # experiences. See the next test for that.
     hits = [label for label, text in NOT_PII
             if "CREDIT_CARD" in categories(shield, text)]
-    assert hits == [], "false positives: %s" % hits
+    assert hits == [], "credit-card false positives: %s" % hits
+
+
+def test_the_default_config_false_positive_rate_is_recorded():
+    # The number above is the one this release moved, but it is not the one
+    # a user sees: NER is on by default, and it tags a git SHA as a PERSON
+    # and a bare word as an ORG. A build number is read as a PHONE even
+    # regex-only.
+    #
+    # None of that is new or caused by this release -- it is visible only
+    # because the corpus now exists. Pinned here so the next person to work
+    # on false positives starts from a measured number rather than
+    # rediscovering it, and so a regression in ANY category shows up.
+    from cloakllm import Shield, ShieldConfig
+
+    default = Shield(ShieldConfig(audit_enabled=False))
+    hits = sorted(label for label, text in NOT_PII
+                  if categories(default, text))
+    assert hits == ["git sha", "non-Luhn 16 digit", "semver-ish build"], (
+        "the default-config false-positive set changed: %s" % hits)
 
 
 # --------------------------------------------------------- documented gaps
