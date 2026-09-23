@@ -11,8 +11,10 @@
 If you discover a security vulnerability in CloakLLM, please report it responsibly through **GitHub Security Advisories**:
 
 1. Go to the [Security Advisories page](https://github.com/cloakllm/CloakLLM/security/advisories/new)
-2. Click **"New draft security advisory"**
+2. Sign in to GitHub if asked. The page opens a private **"Report a vulnerability"** form that only the maintainers can see
 3. Fill in the details of the vulnerability
+
+No GitHub account? Email **team@cloakllm.dev** instead.
 
 **Please do NOT open a public GitHub issue for security vulnerabilities.**
 
