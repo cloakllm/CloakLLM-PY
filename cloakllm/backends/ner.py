@@ -11,7 +11,9 @@ import warnings
 from typing import TYPE_CHECKING
 
 from cloakllm.backends.base import DetectorBackend
-from cloakllm.detector import Detection, ALLOWED_SPACY_MODELS, _NER_LABEL_MAP
+from cloakllm.detector import (
+    Detection, ALLOWED_SPACY_MODELS, _NER_LABEL_MAP, clean_ner_span,
+)
 
 if TYPE_CHECKING:
     from cloakllm.config import ShieldConfig
@@ -118,13 +120,15 @@ class NerBackend(DetectorBackend):
             if ent.label_ not in self.config.ner_entity_types:
                 continue
             mapped_label = _NER_LABEL_MAP.get(ent.label_, ent.label_)
-            start, end = ent.start_char, ent.end_char
+            # v0.12.7 (#10): trim quotes/brackets off the edges, drop code.
+            span = clean_ner_span(text, ent.start_char, ent.end_char)
+            if span is None:
+                continue
+            start, end = span
             if any(start < e and end > s for s, e in covered_spans):
                 continue
-            if len(ent.text.strip()) < 2:
-                continue
             detections.append(Detection(
-                text=ent.text,
+                text=text[start:end],
                 category=mapped_label,
                 start=start,
                 end=end,

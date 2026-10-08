@@ -5,6 +5,39 @@ All notable changes to CloakLLM will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioned per [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.7] - 2026-10-08
+
+Patch release. Fixes the defects reported in [cloakllm/CloakLLM#10](https://github.com/cloakllm/CloakLLM/issues/10) by a user running CloakLLM inside an agent over MongoDB records -- plus a wider one that reproducing the report uncovered and the report did not mention.
+
+### Fixed
+- **Parts of ordinary decimal numbers were detected as personal data.** A 9-digit integer part (`764623112.909`) came back as an SSN, a dotted decimal (`237.07924402`) as a PHONE, and a Luhn-valid 16-digit fraction (`51350.4754678208288285`) as a CREDIT_CARD. Out of 6,016 random decimals, **1,152 were rewritten** (758 SSN, 386 PHONE, 8 CREDIT_CARD) -- identically in both SDKs. Every value restored correctly on desanitize, but in between the model and any tools saw corrupted numbers: prices, coordinates, a `market_value` from a database. **With a `locale` set it was far worse: 11,139 detections on 6,000 decimals across the 13 locale packs**, because several locale phone patterns have no digit boundary and matched from the *middle* of a number (`'09139099'` out of `1.61318609139099`). That part predates this release.
+
+A match is now rejected when the whole number around it is a decimal: extend outwards over digits and dots, drop a trailing sentence period, and check for digits, exactly one dot, digits. The check runs after the regex ("regex proposes, code disposes", like the Luhn gate), so a rejected span stays available to later patterns. After the fix: **0 of 6,016 on the default config and 0 of 6,000 under every locale.**
+
+**Not affected:**
+- Anything with more than one dot: `1.800.555.1234`, `06.12.34.56.78`, version strings, IP addresses.
+- A trailing sentence period: `ssn: 123456789.`
+- E.164 numbers: `+1.555.123.4567`
+- `custom_patterns`, which are matched exactly as written.
+- **One trade-off:** a phone number written with a *single* dot is indistinguishable from a decimal. It is kept when a phone keyword sits right before it (`phone: 555.1234567`, `Tel. 030.1234567`) and treated as a number otherwise.
+- **A name's closing quote was swallowed into its token.** Reading a Python dict printed as text, spaCy returned `Shawn Hardin'` -- the name *and* the quote after it -- so `'name': 'Shawn Hardin'}` became `'name': '[PERSON_1]}`, and the payload the model saw was no longer well-formed. NER spans now have quotes, brackets and separator punctuation trimmed from their edges. The period is kept, because `Acme Inc.` ends in one.
+- **A MongoDB ObjectId was tagged as a place.** spaCy returned `ObjectId('68cfeb61...` as GPE. A NER span that is plainly code -- a call such as `ObjectId(`, braces, `=`, or a run of five or more digits -- is now dropped. `John (Jack) Smith` is unaffected, since its bracket follows a space. Square brackets deliberately do **not** count as code: `jane[at]example[dot]org` is how people obfuscate an email, and the hard corpus caught a first draft of this rule that let it leak.
+
+### Behaviour change on upgrade
+
+Sanitized output changes in three ways, all intended:
+
+1. **Decimal numbers pass through.** Text that used to come back as `20042839.[SSN_1]` now comes back unchanged. The one input this could matter for is a real identifier written *directly against* a decimal point with no separators, such as `123456789.5`. That is the shape of a number, and it is now treated as one.
+2. **Names no longer carry punctuation.** `'[PERSON_1]` becomes `'[PERSON_1]'`. Token maps from earlier versions still restore correctly; only the span boundaries are tighter.
+3. **Code-shaped NER spans are no longer tokenised.**
+
+If you pinned an expected sanitized string in a test, re-run it.
+
+### Verified
+- The reporter's exact payload now sanitizes byte-identically in both SDKs and round-trips unchanged; it is a regression test in each.
+- No recall lost: 14 cases of real SSNs, phone numbers and cards written next to dots are still caught in both SDKs. The main detection benchmark and the hard corpus are unchanged from 0.12.6. The cross-SDK regex differential shows 0 divergences across 198 inputs.
+- The new tests fail on 0.12.6.
+
 ## [0.12.6] - 2026-09-20
 
 Patch release. Re-aligns the three packages on one version number after v0.12.5 shipped to npm alone: that was a JavaScript-only crash fix, so Python and MCP correctly stayed at 0.12.4 and there is no 0.12.5 for them.

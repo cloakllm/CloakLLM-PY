@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from cloakllm.backends.base import DetectorBackend
 from cloakllm.detector import (
-    Detection, PATTERNS, has_phone_context, luhn_valid,
+    Detection, PATTERNS, has_phone_context, in_decimal_number, luhn_valid,
 )
 from cloakllm.locale_patterns import LOCALE_PATTERNS
 
@@ -70,6 +70,9 @@ class RegexBackend(DetectorBackend):
     def __init__(self, config: ShieldConfig):
         self.config = config
         self._compiled_patterns: list[tuple[str, re.Pattern]] = []
+        # Custom patterns are the user's own regexes and are matched exactly
+        # as written; the decimal gate in detect() applies only to ours.
+        self._custom_count = 0
         self._build_patterns()
 
     @property
@@ -138,6 +141,7 @@ class RegexBackend(DetectorBackend):
                     )
                     continue
                 self._compiled_patterns.append((name, compiled))
+                self._custom_count += 1
             except re.error:
                 warnings.warn(
                     f"Invalid custom regex pattern for '{name}': {pattern!r}",
@@ -214,10 +218,20 @@ class RegexBackend(DetectorBackend):
     ) -> list[Detection]:
         detections: list[Detection] = []
 
-        for name, pattern in self._compiled_patterns:
+        for index, (name, pattern) in enumerate(self._compiled_patterns):
+            builtin = index >= self._custom_count
             for match in pattern.finditer(text):
                 start, end = match.start(), match.end()
                 if any(start < e and end > s for s, e in covered_spans):
+                    continue
+                # v0.12.7 (#10): part of a decimal number is not personal
+                # data. Rejected here so the span stays uncovered. A phone
+                # number written as digits.digits looks exactly like one,
+                # so a phone category keeps it when a phone keyword is
+                # right before it -- the gate contiguous NANP numbers use.
+                if (builtin and in_decimal_number(text, start, end)
+                        and not (name.startswith("PHONE")
+                                 and has_phone_context(text, start))):
                     continue
                 if name == "PHONE" and len(match.group().replace("-", "").replace(" ", "").replace(".", "")) < 7:
                     continue

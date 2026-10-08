@@ -98,6 +98,71 @@ def has_phone_context(text: str, start: int) -> bool:
         text[max(0, start - PHONE_CONTEXT_WINDOW):start]))
 
 
+_DECIMAL_RE = re.compile(r"\d+\.\d+")
+_NUMERIC_CHARS = frozenset("0123456789.")
+
+
+def in_decimal_number(text: str, start: int, end: int) -> bool:
+    """Does this match lie inside a decimal number?
+
+    v0.12.7 (cloakllm/CloakLLM#10). Before this, numeric data was rewritten
+    as personal data. In 6,016 random decimals on the default config, 1,152
+    were tagged: the integer part of 764623112.909 as SSN, 237.07924402 as
+    PHONE, a Luhn-valid 16-digit fraction as CREDIT_CARD. With a locale set
+    it was 11,139 of 6,000, because several locale phone patterns have no
+    digit boundary and match from the MIDDLE of a number ('09139099' out of
+    1.61318609139099). A market_value or a coordinate sent to a model came
+    back corrupted.
+
+    The test looks at the whole number around the match, not just the
+    characters touching it: extend outwards over digits and dots, drop a
+    trailing sentence period, and ask whether what remains is a decimal --
+    digits, exactly ONE dot, digits. Version strings (1.2.3), IP addresses
+    and dotted phone numbers (1.800.555.1234, 555.123.4567) have more than
+    one dot and are unaffected. So is "ssn: 123456789." -- a trailing
+    period is punctuation, not a fraction.
+    """
+    left = start
+    while left > 0 and text[left - 1] in _NUMERIC_CHARS:
+        left -= 1
+    right = end
+    while right < len(text) and text[right] in _NUMERIC_CHARS:
+        right += 1
+    token = text[left:right].rstrip(".")
+    return bool(_DECIMAL_RE.fullmatch(token))
+
+
+# Characters that can sit at the edge of a NER span but are never part of a
+# name. The period is deliberately absent: "Acme Inc." ends in one.
+_NER_EDGE_CHARS = "'\"`()[]{}<>,;: \t\r\n"
+# A NER span containing any of these is code, not a name: a call such as
+# ObjectId( -- a letter directly followed by "(" -- braces, angle brackets,
+# "=", or a run of five or more digits. "John (Jack) Smith" is unaffected:
+# its bracket follows a space. Square brackets are deliberately NOT here:
+# "jane[at]example[dot]org" is how people obfuscate an email, and spaCy
+# tagging it ORG is what keeps it from leaking -- the hard corpus caught a
+# first version of this rule that let it through.
+_NER_CODE_RE = re.compile(r"[A-Za-z_]\(|[{}<>=]|\d{5,}")
+
+
+def clean_ner_span(text: str, start: int, end: int):
+    """Tidy a NER span, or reject it. Returns (start, end) or None.
+
+    v0.12.7 (cloakllm/CloakLLM#10). spaCy, reading a Python dict printed as
+    text, returned 'Shawn Hardin\\'' -- the name AND its closing quote -- so
+    the token replaced the quote and the payload the model saw was no longer
+    well-formed. It also returned ObjectId('68cfeb61...') as a place (GPE).
+    Edge punctuation is trimmed; spans that are plainly code are dropped.
+    """
+    while start < end and text[start] in _NER_EDGE_CHARS:
+        start += 1
+    while end > start and text[end - 1] in _NER_EDGE_CHARS:
+        end -= 1
+    if end - start < 2 or _NER_CODE_RE.search(text, start, end):
+        return None
+    return start, end
+
+
 def luhn_valid(number: str) -> bool:
     """Does this digit run pass the Luhn checksum every card issuer uses?
 
