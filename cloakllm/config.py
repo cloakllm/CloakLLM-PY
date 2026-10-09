@@ -159,6 +159,9 @@ class ShieldConfig:
     # restricted three-digit area (irreversible). zip3_restricted overrides
     # the HHS Census-2000 list in clinical_geo.DEFAULT_ZIP3_RESTRICTED.
     detect_zip_codes: bool = False
+    # v0.13.0 health edition: US street addresses and PO boxes (number +
+    # capitalised street name + street suffix). Off by default.
+    detect_street_addresses: bool = False
     zip_mode: str = "tokenize"
     zip3_restricted: Optional[frozenset] = None
     # How a detected date or age-over-89 is replaced:

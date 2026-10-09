@@ -135,6 +135,7 @@ class RegexBackend(DetectorBackend):
             "AGE_90PLUS": self.config.detect_ages_over_89,
             **{c: self.config.detect_us_health_ids for c in US_HEALTH_ID_CATEGORIES},
             "ZIP": self.config.detect_zip_codes,
+            "STREET_ADDRESS": self.config.detect_street_addresses,
         }
 
         # Custom patterns first

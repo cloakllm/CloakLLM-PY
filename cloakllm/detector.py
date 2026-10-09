@@ -217,6 +217,7 @@ PATTERNS: dict[str, tuple[str, str]] = {
     "LICENSE_NUMBER": (r"license_number", _ids.LICENSE_PATTERN),
     # v0.13.0 health edition: US ZIP codes in address context only. OFF by
     # default -- ShieldConfig.detect_zip_codes. See clinical_geo.py.
+    "STREET_ADDRESS": (r"street_address", _geo.STREET_ADDRESS_PATTERN),
     "ZIP": (r"zip", _geo.ZIP_PATTERN),
     # v0.13.0 health edition: clinical dates and ages over 89 (HIPAA Safe
     # Harbor items C). OFF by default -- ShieldConfig.detect_dates /

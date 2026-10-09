@@ -45,6 +45,39 @@ ZIP_PATTERN = (
     + r")" + _ZIP_VALUE
 )
 
+# --- Street addresses (Safe Harbor (B): "street address") -------------------
+#
+# House number + optional direction + 1-4 street-name words + a REQUIRED
+# street suffix, then an optional unit. The suffix and the capitalised name
+# words are the false-positive guard: without them "walk 3 blocks down the
+# road" is an address. Accepted miss, stated in the docs: an all-lowercase
+# address ("418 maple ave") is not caught.
+#
+# Category STREET_ADDRESS, not ADDRESS: ADDRESS belongs to the optional LLM
+# pass, and the registry keeps regex and LLM categories apart.
+_SUFFIXES = [
+    "Street", "St", "Avenue", "Ave", "Av", "Road", "Rd", "Boulevard", "Blvd", "Drive", "Dr",
+    "Lane", "Ln", "Court", "Ct", "Way", "Place", "Pl", "Parkway", "Pkwy", "Circle", "Cir",
+    "Terrace", "Ter", "Highway", "Hwy", "Trail", "Trl", "Square", "Sq", "Loop", "Pike",
+    "Plaza", "Plz", "Alley", "Aly", "Crescent", "Cres", "Ridge", "Rdg",
+]
+# Both "Ave" and "AVE" (an all-caps address); explicit, so both SDKs compile
+# the same text without an ignore-case flag.
+_SUFFIX = "(?:" + "|".join(sorted({s for x in _SUFFIXES for s in (x, x.upper())},
+                                  key=lambda s: (-len(s), s))) + r")\b\.?"
+_HOUSE = r"(?<![\w./-])\d{1,6}[A-Za-z]?(?:\s1/2)?"
+_DIRECTION = r"(?:(?:North|South|East|West|NE|NW|SE|SW|N|S|E|W)\.?\s)?"
+_NAME_WORD = r"(?:[A-Z][a-z]+|[A-Z]{2,}|\d{1,3}(?:st|nd|rd|th))"
+_UNIT = (r"(?:,?\s(?:Apt|Apartment|Unit|Suite|Ste|Fl|Floor|Rm|Room|Bldg|APT|UNIT|SUITE|STE)\.?\s?#?\s?[A-Za-z0-9-]{1,6}"
+         r"|,?\s#\s?[A-Za-z0-9-]{1,6})?")
+_POST_DIRECTION = r"(?:\s(?:NE|NW|SE|SW|N|S|E|W)\b\.?)?"   # "Pennsylvania Avenue NW"
+STREET_ADDRESS_PATTERN = (
+    _HOUSE + r"\s" + _DIRECTION + _NAME_WORD + r"(?:\s" + _NAME_WORD + r"){0,3}\s" + _SUFFIX
+    + _POST_DIRECTION + _UNIT
+    + r"|(?<![A-Za-z])P\.?\s?O\.?\s?[Bb]ox\s\d{1,6}"
+)
+
+
 # HHS OCR de-identification guidance, FAQ 3.1: the three-digit ZIP areas with
 # 20,000 or fewer people, from Census 2000. HHS itself says to use newer data
 # when it exists, so this is a DEFAULT, overridable via
