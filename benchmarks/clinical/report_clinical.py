@@ -59,6 +59,13 @@ def configs(log_dir: str):
             detect_dates=True, detect_ages_over_89=True, detect_us_health_ids=True,
             detect_zip_codes=True, detect_street_addresses=True, detect_role_names=True,
         ),
+        # v0.13.0: everything above plus the clinical-term veto (over-removal).
+        "health-full": ShieldConfig(
+            log_dir=log_dir, audit_enabled=False,
+            detect_dates=True, detect_ages_over_89=True, detect_us_health_ids=True,
+            detect_zip_codes=True, detect_street_addresses=True, detect_role_names=True,
+            protect_clinical_terms=True,
+        ),
         "tuned-0.12.7": ShieldConfig(
             log_dir=log_dir, audit_enabled=False,
             ner_entity_types={"PERSON", "GPE"},

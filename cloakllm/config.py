@@ -168,6 +168,11 @@ class ShieldConfig:
     # -> "Thomas Parkinson"). Emitted as PERSON. Off by default. See
     # clinical_names.py.
     detect_role_names: bool = False
+    # v0.13.0 health edition: do not let NER remove clinical vocabulary
+    # ("INR", "Hx COPD", "apixaban") or the eponym inside a disease name
+    # ("Crohn's disease"). Vetoes NER guesses only, never a regex or LLM
+    # detection. Off by default. See clinical_terms.py.
+    protect_clinical_terms: bool = False
     zip_mode: str = "tokenize"
     zip3_restricted: Optional[frozenset] = None
     # How a detected date or age-over-89 is replaced:

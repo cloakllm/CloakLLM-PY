@@ -15,6 +15,7 @@ from cloakllm.detector import (
     Detection, ALLOWED_SPACY_MODELS, _NER_LABEL_MAP, clean_ner_span,
 )
 from cloakllm.clinical_names import extend_first_name
+from cloakllm.clinical_terms import is_clinical_span
 
 if TYPE_CHECKING:
     from cloakllm.config import ShieldConfig
@@ -126,6 +127,11 @@ class NerBackend(DetectorBackend):
             if span is None:
                 continue
             start, end = span
+            # v0.13.0 health edition: a NER guess that is clinical vocabulary
+            # ("INR", "Hx COPD") or the eponym in a disease name ("Crohn's
+            # disease") is not removed. NER guesses only; see clinical_terms.
+            if getattr(self.config, "protect_clinical_terms", False) and is_clinical_span(text, start, end):
+                continue
             # v0.13.0 health edition: "Thomas" -> "Thomas Parkinson" when NER
             # stopped at a surname that is also a disease eponym. Kept short
             # if the surname is already claimed by an earlier pass.
