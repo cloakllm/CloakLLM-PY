@@ -169,8 +169,15 @@ class TestCategoryRegistry:
             | SPECIAL_CATEGORY_CATEGORIES | LOCALE_CATEGORIES
         )
 
-    def test_reserved_equals_builtin(self):
-        assert RESERVED_CATEGORIES == BUILTIN_CATEGORIES
+    def test_reserved_is_builtin_minus_opt_in(self):
+        # DATE and AGE_90PLUS became built-ins in v0.13.0. They are
+        # deliberately not reserved, so an existing custom pattern named
+        # DATE keeps working.
+        from cloakllm.token_spec import OPT_IN_CATEGORIES
+        assert OPT_IN_CATEGORIES == {"DATE", "AGE_90PLUS"}
+        assert RESERVED_CATEGORIES == BUILTIN_CATEGORIES - OPT_IN_CATEGORIES
+        assert "DATE" in BUILTIN_CATEGORIES and "DATE" not in RESERVED_CATEGORIES
+        assert "EMAIL" in RESERVED_CATEGORIES
 
     def test_no_overlap_regex_ner(self):
         assert REGEX_CATEGORIES & NER_CATEGORIES == set()

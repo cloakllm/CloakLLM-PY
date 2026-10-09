@@ -41,6 +41,11 @@ def configs(log_dir: str):
     shown on cloakllm.dev/health -- measured here so its limits are known."""
     return {
         "default": ShieldConfig(log_dir=log_dir, audit_enabled=False),
+        # v0.13.0: default settings plus the clinical date and age engine.
+        "default+dates": ShieldConfig(
+            log_dir=log_dir, audit_enabled=False,
+            detect_dates=True, detect_ages_over_89=True,
+        ),
         "tuned-0.12.7": ShieldConfig(
             log_dir=log_dir, audit_enabled=False,
             ner_entity_types={"PERSON", "GPE"},

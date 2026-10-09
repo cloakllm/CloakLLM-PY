@@ -41,6 +41,7 @@ CATEGORY_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
 REGEX_CATEGORIES = frozenset({
     "EMAIL", "SSN", "CREDIT_CARD", "PHONE", "IP_ADDRESS",
     "API_KEY", "AWS_KEY", "JWT", "IBAN", "IL_ID",
+    "DATE", "AGE_90PLUS",  # v0.13.0 health edition, off by default
 })
 
 # NER categories (Pass 2)
@@ -113,8 +114,13 @@ BUILTIN_CATEGORIES = (
     | LOCALE_CATEGORIES
 )
 
+# Opt-in categories added after names were already user-choosable (v0.13.0).
+# They are built in, but NOT reserved: a user who already had a custom
+# pattern or LLM category called DATE must not get an error on upgrade.
+OPT_IN_CATEGORIES = frozenset({"DATE", "AGE_90PLUS"})
+
 # Reserved categories that custom patterns must not use
-RESERVED_CATEGORIES = BUILTIN_CATEGORIES
+RESERVED_CATEGORIES = BUILTIN_CATEGORIES - OPT_IN_CATEGORIES
 
 
 # --- Validation functions ---

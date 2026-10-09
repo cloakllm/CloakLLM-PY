@@ -145,6 +145,19 @@ class ShieldConfig:
     detect_api_keys: bool = True
     detect_ip_addresses: bool = True
     detect_iban: bool = True
+    # v0.13.0 health edition (HIPAA Safe Harbor dates and ages). Off by
+    # default so existing behaviour is unchanged. See clinical_dates.py.
+    detect_dates: bool = False
+    detect_ages_over_89: bool = False
+    # How a detected date or age-over-89 is replaced:
+    #   "tokenize"        -> [DATE_0] / [AGE_90PLUS_0], restored on desanitize
+    #   "generalize_year" -> the Safe Harbor form: the date's four-digit year
+    #                        (or [DATE_REDACTED] if it has none), and "90+"
+    #                        for an age. Irreversible, like mode="redact".
+    # Keyed per-patient date SHIFTING is deliberately not offered yet: it
+    # keeps month and day, so it is not Safe Harbor (Expert Determination
+    # only), and it needs its own design.
+    date_mode: str = "tokenize"
     # Custom patterns: list of (name, regex_pattern) tuples
     custom_patterns: list[tuple[str, str]] = field(default_factory=list)
     # Custom LLM categories: list of (name, description) tuples for semantic detection
@@ -335,6 +348,12 @@ class ShieldConfig:
         self.log_dir = Path(self.log_dir)
         if self.mode not in ("tokenize", "redact"):
             raise ValueError(f"Invalid mode '{self.mode}'. Must be 'tokenize' or 'redact'.")
+        if self.date_mode not in ("tokenize", "generalize_year"):
+            raise ValueError(
+                f"Invalid date_mode '{self.date_mode}'. Must be 'tokenize' or "
+                f"'generalize_year'. Date shifting is not available: it keeps "
+                f"month and day, so it does not meet HIPAA Safe Harbor."
+            )
         # Compliance mode validation
         _VALID_COMPLIANCE_MODES = (None, "eu_ai_act_article12")
         if self.compliance_mode not in _VALID_COMPLIANCE_MODES:

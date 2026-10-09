@@ -58,6 +58,7 @@ from typing import Any, Optional
 
 from cloakllm.config import ShieldConfig
 from cloakllm.detector import Detection
+from cloakllm.clinical_dates import GENERALIZED_CATEGORIES, generalize
 from cloakllm.token_spec import (
     CLOAKLLM_TOKEN_REGEX as _TOKEN_PATTERN,
     ESCAPED_OPEN as _ESCAPED_OPEN,
@@ -156,6 +157,10 @@ class TokenMap:
             else:
                 key = det.text.strip()
                 token = self.forward.get(key, "")
+                if not token and det.category in GENERALIZED_CATEGORIES:
+                    # Replaced by its Safe Harbor form; the form itself is
+                    # derived from the value, so it is not echoed here.
+                    token = f"[{det.category}_GENERALIZED]"
             detail = {
                 "category": det.category,
                 "start": det.start,
@@ -226,8 +231,17 @@ class Tokenizer:
 
         # Escape any existing token-like patterns to prevent fake token injection
         result = self._escape_existing_tokens(text)
+        generalize_dates = (
+            getattr(self.config, "date_mode", "tokenize") == "generalize_year"
+            and token_map.mode != "redact"
+        )
         for det in reversed(detections):
-            token = token_map.get_or_create(det.text, det.category)
+            if generalize_dates and det.category in GENERALIZED_CATEGORIES:
+                # v0.13.0: Safe Harbor form (year / "90+"), irreversible and
+                # never stored in the token map.
+                token = generalize(det.category, det.text)
+            else:
+                token = token_map.get_or_create(det.text, det.category)
             result = result[:det.start] + token + result[det.end:]
             token_map.detections.append(det)
 

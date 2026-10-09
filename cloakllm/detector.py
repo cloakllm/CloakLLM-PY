@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass
 
 from cloakllm.config import ShieldConfig
+from cloakllm import clinical_dates as _clin
 
 ALLOWED_SPACY_MODELS = frozenset({
     "en_core_web_sm", "en_core_web_md", "en_core_web_lg", "en_core_web_trf",
@@ -198,6 +199,19 @@ PATTERNS: dict[str, tuple[str, str]] = {
     "EMAIL": (
         r"email",
         r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b"
+    ),
+    # v0.13.0 health edition: clinical dates and ages over 89 (HIPAA Safe
+    # Harbor items C). OFF by default -- ShieldConfig.detect_dates /
+    # detect_ages_over_89. Placed before SSN and PHONE so a date's digits are
+    # claimed as a date first. Every match is validated in code
+    # (clinical_dates.is_valid_date / is_age_over_89), see that module.
+    "DATE": (
+        r"date",
+        _clin.DATE_PATTERN,
+    ),
+    "AGE_90PLUS": (
+        r"age_90plus",
+        _clin.AGE_PATTERN,
     ),
     # US Social Security Numbers
     "SSN": (

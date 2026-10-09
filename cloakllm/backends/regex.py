@@ -16,6 +16,7 @@ from cloakllm.detector import (
     Detection, PATTERNS, has_phone_context, in_decimal_number, luhn_valid,
 )
 from cloakllm.locale_patterns import LOCALE_PATTERNS
+from cloakllm.clinical_dates import is_age_over_89, is_valid_date
 
 if TYPE_CHECKING:
     from cloakllm.config import ShieldConfig
@@ -126,6 +127,9 @@ class RegexBackend(DetectorBackend):
             "JWT": self.config.detect_api_keys,
             "IBAN": self.config.detect_iban,
             "IL_ID": False,
+            # v0.13.0 health edition: off unless asked for.
+            "DATE": self.config.detect_dates,
+            "AGE_90PLUS": self.config.detect_ages_over_89,
         }
 
         # Custom patterns first
@@ -232,6 +236,12 @@ class RegexBackend(DetectorBackend):
                 if (builtin and in_decimal_number(text, start, end)
                         and not (name.startswith("PHONE")
                                  and has_phone_context(text, start))):
+                    continue
+                # v0.13.0: a date or age pattern only proposes. See
+                # clinical_dates for what makes a match a real date/age.
+                if builtin and name == "DATE" and not is_valid_date(text, start, end):
+                    continue
+                if builtin and name == "AGE_90PLUS" and not is_age_over_89(text, start, end):
                     continue
                 if name == "PHONE" and len(match.group().replace("-", "").replace(" ", "").replace(".", "")) < 7:
                     continue
