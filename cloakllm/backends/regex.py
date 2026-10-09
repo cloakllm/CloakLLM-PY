@@ -134,6 +134,7 @@ class RegexBackend(DetectorBackend):
             "DATE": self.config.detect_dates,
             "AGE_90PLUS": self.config.detect_ages_over_89,
             **{c: self.config.detect_us_health_ids for c in US_HEALTH_ID_CATEGORIES},
+            "ZIP": self.config.detect_zip_codes,
         }
 
         # Custom patterns first
@@ -233,7 +234,7 @@ class RegexBackend(DetectorBackend):
                 # v0.13.0: a label-gated pattern matches LABEL + VALUE; only
                 # the value (its single capture group, which ends the match)
                 # is detected, so the label stays readable.
-                value_only = builtin and name in VALUE_GROUP_CATEGORIES
+                value_only = builtin and (name in VALUE_GROUP_CATEGORIES or name == "ZIP")
                 if value_only:
                     start = end - len(match.group(1))
                 if any(start < e and end > s for s, e in covered_spans):

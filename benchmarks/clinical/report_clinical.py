@@ -50,6 +50,7 @@ def configs(log_dir: str):
         "default+health": ShieldConfig(
             log_dir=log_dir, audit_enabled=False,
             detect_dates=True, detect_ages_over_89=True, detect_us_health_ids=True,
+            detect_zip_codes=True,
         ),
         "tuned-0.12.7": ShieldConfig(
             log_dir=log_dir, audit_enabled=False,

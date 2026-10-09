@@ -59,6 +59,7 @@ from typing import Any, Optional
 from cloakllm.config import ShieldConfig
 from cloakllm.detector import Detection
 from cloakllm.clinical_dates import GENERALIZED_CATEGORIES, generalize
+from cloakllm.clinical_geo import zip3
 from cloakllm.token_spec import (
     CLOAKLLM_TOKEN_REGEX as _TOKEN_PATTERN,
     ESCAPED_OPEN as _ESCAPED_OPEN,
@@ -157,7 +158,7 @@ class TokenMap:
             else:
                 key = det.text.strip()
                 token = self.forward.get(key, "")
-                if not token and det.category in GENERALIZED_CATEGORIES:
+                if not token and (det.category in GENERALIZED_CATEGORIES or det.category == "ZIP"):
                     # Replaced by its Safe Harbor form; the form itself is
                     # derived from the value, so it is not echoed here.
                     token = f"[{det.category}_GENERALIZED]"
@@ -235,11 +236,19 @@ class Tokenizer:
             getattr(self.config, "date_mode", "tokenize") == "generalize_year"
             and token_map.mode != "redact"
         )
+        zip3_mode = (
+            getattr(self.config, "zip_mode", "tokenize") == "zip3"
+            and token_map.mode != "redact"
+        )
         for det in reversed(detections):
             if generalize_dates and det.category in GENERALIZED_CATEGORIES:
                 # v0.13.0: Safe Harbor form (year / "90+"), irreversible and
                 # never stored in the token map.
                 token = generalize(det.category, det.text)
+            elif zip3_mode and det.category == "ZIP":
+                # v0.13.0: Safe Harbor ZIP form (first three digits, or 000
+                # for a restricted area), irreversible.
+                token = zip3(det.text, getattr(self.config, "zip3_restricted", None))
             else:
                 token = token_map.get_or_create(det.text, det.category)
             result = result[:det.start] + token + result[det.end:]

@@ -153,6 +153,14 @@ class ShieldConfig:
     # and Medicaid IDs, licence, NPI, Medicare MBI and HICN, DEA, partial
     # SSN). Off by default. See clinical_ids.py.
     detect_us_health_ids: bool = False
+    # v0.13.0 health edition: US ZIP codes, in address context only. Off by
+    # default. zip_mode "tokenize" -> [ZIP_0] (reversible); "zip3" -> the
+    # Safe Harbor form: first three digits + "XX", or "000XX" for a
+    # restricted three-digit area (irreversible). zip3_restricted overrides
+    # the HHS Census-2000 list in clinical_geo.DEFAULT_ZIP3_RESTRICTED.
+    detect_zip_codes: bool = False
+    zip_mode: str = "tokenize"
+    zip3_restricted: Optional[frozenset] = None
     # How a detected date or age-over-89 is replaced:
     #   "tokenize"        -> [DATE_0] / [AGE_90PLUS_0], restored on desanitize
     #   "generalize_year" -> the Safe Harbor form: the date's four-digit year
@@ -352,6 +360,13 @@ class ShieldConfig:
         self.log_dir = Path(self.log_dir)
         if self.mode not in ("tokenize", "redact"):
             raise ValueError(f"Invalid mode '{self.mode}'. Must be 'tokenize' or 'redact'.")
+        if self.zip_mode not in ("tokenize", "zip3"):
+            raise ValueError(f"Invalid zip_mode '{self.zip_mode}'. Must be 'tokenize' or 'zip3'.")
+        if self.zip3_restricted is not None:
+            bad = [z for z in self.zip3_restricted if not (isinstance(z, str) and len(z) == 3 and z.isdigit())]
+            if bad:
+                raise ValueError(f"zip3_restricted must contain three-digit strings, got {bad[:3]!r}.")
+            self.zip3_restricted = frozenset(self.zip3_restricted)
         if self.date_mode not in ("tokenize", "generalize_year"):
             raise ValueError(
                 f"Invalid date_mode '{self.date_mode}'. Must be 'tokenize' or "

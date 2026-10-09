@@ -177,7 +177,7 @@ class TestCategoryRegistry:
         assert OPT_IN_CATEGORIES == {
             "DATE", "AGE_90PLUS",
             "MRN", "ACCOUNT_NUMBER", "HEALTH_PLAN_ID", "LICENSE_NUMBER", "NPI",
-            "MEDICARE_MBI", "HICN", "DEA", "SSN_PARTIAL",
+            "MEDICARE_MBI", "HICN", "DEA", "SSN_PARTIAL", "ZIP",
         }
         assert RESERVED_CATEGORIES == BUILTIN_CATEGORIES - OPT_IN_CATEGORIES
         assert "DATE" in BUILTIN_CATEGORIES and "DATE" not in RESERVED_CATEGORIES

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from cloakllm.config import ShieldConfig
 from cloakllm import clinical_dates as _clin
 from cloakllm import clinical_ids as _ids
+from cloakllm import clinical_geo as _geo
 
 ALLOWED_SPACY_MODELS = frozenset({
     "en_core_web_sm", "en_core_web_md", "en_core_web_lg", "en_core_web_trf",
@@ -214,6 +215,9 @@ PATTERNS: dict[str, tuple[str, str]] = {
     "ACCOUNT_NUMBER": (r"account_number", _ids.ACCOUNT_PATTERN),
     "HEALTH_PLAN_ID": (r"health_plan_id", _ids.HEALTH_PLAN_PATTERN),
     "LICENSE_NUMBER": (r"license_number", _ids.LICENSE_PATTERN),
+    # v0.13.0 health edition: US ZIP codes in address context only. OFF by
+    # default -- ShieldConfig.detect_zip_codes. See clinical_geo.py.
+    "ZIP": (r"zip", _geo.ZIP_PATTERN),
     # v0.13.0 health edition: clinical dates and ages over 89 (HIPAA Safe
     # Harbor items C). OFF by default -- ShieldConfig.detect_dates /
     # detect_ages_over_89. Placed before SSN and PHONE so a date's digits are
