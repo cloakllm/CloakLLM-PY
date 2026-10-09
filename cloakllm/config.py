@@ -162,6 +162,12 @@ class ShieldConfig:
     # v0.13.0 health edition: US street addresses and PO boxes (number +
     # capitalised street name + street suffix). Off by default.
     detect_street_addresses: bool = False
+    # v0.13.0 health edition: names after a role word ("Patient Hector
+    # Vance", "Mother Aisha Sato", "Dr. Cho"), names heading a line of
+    # identifiers, and surname completion for one-word NER names ("Thomas"
+    # -> "Thomas Parkinson"). Emitted as PERSON. Off by default. See
+    # clinical_names.py.
+    detect_role_names: bool = False
     zip_mode: str = "tokenize"
     zip3_restricted: Optional[frozenset] = None
     # How a detected date or age-over-89 is replaced:

@@ -20,6 +20,9 @@ from cloakllm.clinical_dates import is_age_over_89, is_valid_date
 from cloakllm.clinical_ids import (
     US_HEALTH_ID_CATEGORIES, VALUE_GROUP_CATEGORIES, accept as accept_health_id,
 )
+from cloakllm.clinical_names import (
+    CATEGORY_ALIAS as NAME_CATEGORY_ALIAS, ROLE_NAME_CATEGORIES, trim_name,
+)
 
 if TYPE_CHECKING:
     from cloakllm.config import ShieldConfig
@@ -136,6 +139,8 @@ class RegexBackend(DetectorBackend):
             **{c: self.config.detect_us_health_ids for c in US_HEALTH_ID_CATEGORIES},
             "ZIP": self.config.detect_zip_codes,
             "STREET_ADDRESS": self.config.detect_street_addresses,
+            "ROLE_NAME": self.config.detect_role_names,
+            "HEADER_NAME": self.config.detect_role_names,
         }
 
         # Custom patterns first
@@ -238,6 +243,15 @@ class RegexBackend(DetectorBackend):
                 value_only = builtin and (name in VALUE_GROUP_CATEGORIES or name == "ZIP")
                 if value_only:
                     start = end - len(match.group(1))
+                category = name
+                if builtin and name in ROLE_NAME_CATEGORIES:
+                    # The name is whichever group took part; it ends the
+                    # match. Template words are trimmed or reject the match.
+                    start = end - len(next(g for g in match.groups() if g is not None))
+                    end = trim_name(text, start, end)
+                    if end is None:
+                        continue
+                    category = NAME_CATEGORY_ALIAS[name]
                 if any(start < e and end > s for s, e in covered_spans):
                     continue
                 if builtin and name in US_HEALTH_ID_CATEGORIES and not accept_health_id(name, text, start, end):
@@ -276,7 +290,7 @@ class RegexBackend(DetectorBackend):
                     continue
                 detections.append(Detection(
                     text=text[start:end],  # the value only, for label-gated categories
-                    category=name,
+                    category=category,
                     start=start,
                     end=end,
                     confidence=0.95,

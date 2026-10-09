@@ -17,6 +17,7 @@ from cloakllm.config import ShieldConfig
 from cloakllm import clinical_dates as _clin
 from cloakllm import clinical_ids as _ids
 from cloakllm import clinical_geo as _geo
+from cloakllm import clinical_names as _names
 
 ALLOWED_SPACY_MODELS = frozenset({
     "en_core_web_sm", "en_core_web_md", "en_core_web_lg", "en_core_web_trf",
@@ -232,6 +233,11 @@ PATTERNS: dict[str, tuple[str, str]] = {
         r"age_90plus",
         _clin.AGE_PATTERN,
     ),
+    # v0.13.0 health edition: names after a role word, and names heading a
+    # line of identifiers. Emitted as PERSON. OFF by default --
+    # ShieldConfig.detect_role_names. See clinical_names.py.
+    "ROLE_NAME": (r"role_name", _names.ROLE_NAME_PATTERN),
+    "HEADER_NAME": (r"header_name", _names.HEADER_NAME_PATTERN),
     # US Social Security Numbers
     "SSN": (
         r"ssn",

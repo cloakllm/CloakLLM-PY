@@ -14,6 +14,7 @@ from cloakllm.backends.base import DetectorBackend
 from cloakllm.detector import (
     Detection, ALLOWED_SPACY_MODELS, _NER_LABEL_MAP, clean_ner_span,
 )
+from cloakllm.clinical_names import extend_first_name
 
 if TYPE_CHECKING:
     from cloakllm.config import ShieldConfig
@@ -125,6 +126,13 @@ class NerBackend(DetectorBackend):
             if span is None:
                 continue
             start, end = span
+            # v0.13.0 health edition: "Thomas" -> "Thomas Parkinson" when NER
+            # stopped at a surname that is also a disease eponym. Kept short
+            # if the surname is already claimed by an earlier pass.
+            if mapped_label == "PERSON" and getattr(self.config, "detect_role_names", False):
+                longer = extend_first_name(text, start, end)
+                if not any(end < e and longer > s for s, e in covered_spans):
+                    end = longer
             if any(start < e and end > s for s, e in covered_spans):
                 continue
             detections.append(Detection(
