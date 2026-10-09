@@ -42,6 +42,9 @@ REGEX_CATEGORIES = frozenset({
     "EMAIL", "SSN", "CREDIT_CARD", "PHONE", "IP_ADDRESS",
     "API_KEY", "AWS_KEY", "JWT", "IBAN", "IL_ID",
     "DATE", "AGE_90PLUS",  # v0.13.0 health edition, off by default
+    # v0.13.0 US health identifier pack, off by default
+    "MRN", "ACCOUNT_NUMBER", "HEALTH_PLAN_ID", "LICENSE_NUMBER", "NPI",
+    "MEDICARE_MBI", "HICN", "DEA", "SSN_PARTIAL",
 })
 
 # NER categories (Pass 2)
@@ -117,7 +120,11 @@ BUILTIN_CATEGORIES = (
 # Opt-in categories added after names were already user-choosable (v0.13.0).
 # They are built in, but NOT reserved: a user who already had a custom
 # pattern or LLM category called DATE must not get an error on upgrade.
-OPT_IN_CATEGORIES = frozenset({"DATE", "AGE_90PLUS"})
+OPT_IN_CATEGORIES = frozenset({
+    "DATE", "AGE_90PLUS",
+    "MRN", "ACCOUNT_NUMBER", "HEALTH_PLAN_ID", "LICENSE_NUMBER", "NPI",
+    "MEDICARE_MBI", "HICN", "DEA", "SSN_PARTIAL",
+})
 
 # Reserved categories that custom patterns must not use
 RESERVED_CATEGORIES = BUILTIN_CATEGORIES - OPT_IN_CATEGORIES

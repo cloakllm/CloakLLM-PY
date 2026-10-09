@@ -149,6 +149,10 @@ class ShieldConfig:
     # default so existing behaviour is unchanged. See clinical_dates.py.
     detect_dates: bool = False
     detect_ages_over_89: bool = False
+    # v0.13.0 health edition: US healthcare identifiers (MRN, account, member
+    # and Medicaid IDs, licence, NPI, Medicare MBI and HICN, DEA, partial
+    # SSN). Off by default. See clinical_ids.py.
+    detect_us_health_ids: bool = False
     # How a detected date or age-over-89 is replaced:
     #   "tokenize"        -> [DATE_0] / [AGE_90PLUS_0], restored on desanitize
     #   "generalize_year" -> the Safe Harbor form: the date's four-digit year

@@ -17,6 +17,9 @@ from cloakllm.detector import (
 )
 from cloakllm.locale_patterns import LOCALE_PATTERNS
 from cloakllm.clinical_dates import is_age_over_89, is_valid_date
+from cloakllm.clinical_ids import (
+    US_HEALTH_ID_CATEGORIES, VALUE_GROUP_CATEGORIES, accept as accept_health_id,
+)
 
 if TYPE_CHECKING:
     from cloakllm.config import ShieldConfig
@@ -130,6 +133,7 @@ class RegexBackend(DetectorBackend):
             # v0.13.0 health edition: off unless asked for.
             "DATE": self.config.detect_dates,
             "AGE_90PLUS": self.config.detect_ages_over_89,
+            **{c: self.config.detect_us_health_ids for c in US_HEALTH_ID_CATEGORIES},
         }
 
         # Custom patterns first
@@ -226,7 +230,15 @@ class RegexBackend(DetectorBackend):
             builtin = index >= self._custom_count
             for match in pattern.finditer(text):
                 start, end = match.start(), match.end()
+                # v0.13.0: a label-gated pattern matches LABEL + VALUE; only
+                # the value (its single capture group, which ends the match)
+                # is detected, so the label stays readable.
+                value_only = builtin and name in VALUE_GROUP_CATEGORIES
+                if value_only:
+                    start = end - len(match.group(1))
                 if any(start < e and end > s for s, e in covered_spans):
+                    continue
+                if builtin and name in US_HEALTH_ID_CATEGORIES and not accept_health_id(name, text, start, end):
                     continue
                 # v0.12.7 (#10): part of a decimal number is not personal
                 # data. Rejected here so the span stays uncovered. A phone
@@ -261,7 +273,7 @@ class RegexBackend(DetectorBackend):
                 if name == "CREDIT_CARD" and not luhn_valid(match.group()):
                     continue
                 detections.append(Detection(
-                    text=match.group(),
+                    text=text[start:end],  # the value only, for label-gated categories
                     category=name,
                     start=start,
                     end=end,

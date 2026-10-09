@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 from cloakllm.config import ShieldConfig
 from cloakllm import clinical_dates as _clin
+from cloakllm import clinical_ids as _ids
 
 ALLOWED_SPACY_MODELS = frozenset({
     "en_core_web_sm", "en_core_web_md", "en_core_web_lg", "en_core_web_trf",
@@ -200,6 +201,19 @@ PATTERNS: dict[str, tuple[str, str]] = {
         r"email",
         r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b"
     ),
+    # v0.13.0 health edition: US healthcare identifiers. OFF by default --
+    # ShieldConfig.detect_us_health_ids. Label-gated categories match
+    # LABEL + VALUE and detect only the value; structural ones are checked in
+    # code (clinical_ids.accept). Before SSN so an HICN suffix is not split.
+    "HICN": (r"hicn", _ids.HICN_PATTERN),
+    "SSN_PARTIAL": (r"ssn_partial", _ids.SSN_PARTIAL_PATTERN),
+    "MEDICARE_MBI": (r"medicare_mbi", _ids.MBI_PATTERN),
+    "DEA": (r"dea", _ids.DEA_PATTERN),
+    "NPI": (r"npi", _ids.NPI_PATTERN),
+    "MRN": (r"mrn", _ids.MRN_PATTERN),
+    "ACCOUNT_NUMBER": (r"account_number", _ids.ACCOUNT_PATTERN),
+    "HEALTH_PLAN_ID": (r"health_plan_id", _ids.HEALTH_PLAN_PATTERN),
+    "LICENSE_NUMBER": (r"license_number", _ids.LICENSE_PATTERN),
     # v0.13.0 health edition: clinical dates and ages over 89 (HIPAA Safe
     # Harbor items C). OFF by default -- ShieldConfig.detect_dates /
     # detect_ages_over_89. Placed before SSN and PHONE so a date's digits are

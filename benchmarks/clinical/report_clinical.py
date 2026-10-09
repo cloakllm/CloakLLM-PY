@@ -46,6 +46,11 @@ def configs(log_dir: str):
             log_dir=log_dir, audit_enabled=False,
             detect_dates=True, detect_ages_over_89=True,
         ),
+        # v0.13.0: dates + ages + the US health identifier pack.
+        "default+health": ShieldConfig(
+            log_dir=log_dir, audit_enabled=False,
+            detect_dates=True, detect_ages_over_89=True, detect_us_health_ids=True,
+        ),
         "tuned-0.12.7": ShieldConfig(
             log_dir=log_dir, audit_enabled=False,
             ner_entity_types={"PERSON", "GPE"},

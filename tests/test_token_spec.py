@@ -174,7 +174,11 @@ class TestCategoryRegistry:
         # deliberately not reserved, so an existing custom pattern named
         # DATE keeps working.
         from cloakllm.token_spec import OPT_IN_CATEGORIES
-        assert OPT_IN_CATEGORIES == {"DATE", "AGE_90PLUS"}
+        assert OPT_IN_CATEGORIES == {
+            "DATE", "AGE_90PLUS",
+            "MRN", "ACCOUNT_NUMBER", "HEALTH_PLAN_ID", "LICENSE_NUMBER", "NPI",
+            "MEDICARE_MBI", "HICN", "DEA", "SSN_PARTIAL",
+        }
         assert RESERVED_CATEGORIES == BUILTIN_CATEGORIES - OPT_IN_CATEGORIES
         assert "DATE" in BUILTIN_CATEGORIES and "DATE" not in RESERVED_CATEGORIES
         assert "EMAIL" in RESERVED_CATEGORIES
